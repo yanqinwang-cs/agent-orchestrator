@@ -545,6 +545,29 @@ class RunStatus(StrEnum):
     ATTENTION_REQUIRED = "attention_required"
 
 
+class StageStatus(StrEnum):
+    PENDING = "pending"
+    READY = "ready"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    BLOCKED = "blocked"
+
+
+class OutboxStatus(StrEnum):
+    PENDING = "pending"
+    CLAIMED = "claimed"
+    ACKNOWLEDGED = "acknowledged"
+    REJECTED = "rejected"
+    UNKNOWN = "unknown"
+
+
+class ReservationStatus(StrEnum):
+    HELD = "held"
+    RELEASED = "released"
+
+
 class AttemptStatus(StrEnum):
     PENDING = "pending"
     LAUNCHING = "launching"
@@ -671,9 +694,12 @@ type Intervention = Annotated[
 
 class EventKind(StrEnum):
     RUN_STATUS_CHANGED = "run_status_changed"
+    STAGE_STATUS_CHANGED = "stage_status_changed"
     ATTEMPT_STATUS_CHANGED = "attempt_status_changed"
     INTERVENTION_REQUESTED = "intervention_requested"
     INTERVENTION_DELIVERED = "intervention_delivered"
+    OUTBOX_STATUS_CHANGED = "outbox_status_changed"
+    RESERVATION_STATUS_CHANGED = "reservation_status_changed"
     ARTIFACT_RECORDED = "artifact_recorded"
     HANDOFF_RECORDED = "handoff_recorded"
 
@@ -692,6 +718,14 @@ class RunStatusChangedEvent(EventBase):
     kind: Literal[EventKind.RUN_STATUS_CHANGED]
     previous: RunStatus | None = None
     current: RunStatus
+    reason: str | None = None
+
+
+class StageStatusChangedEvent(EventBase):
+    kind: Literal[EventKind.STAGE_STATUS_CHANGED]
+    stage_id: Identifier
+    previous: StageStatus | None = None
+    current: StageStatus
     reason: str | None = None
 
 
@@ -715,6 +749,25 @@ class InterventionDeliveredEvent(EventBase):
     result: str | None = None
 
 
+class OutboxStatusChangedEvent(EventBase):
+    kind: Literal[EventKind.OUTBOX_STATUS_CHANGED]
+    action_id: UUID
+    previous: OutboxStatus | None = None
+    current: OutboxStatus
+    result: str | None = None
+
+
+class ReservationStatusChangedEvent(EventBase):
+    kind: Literal[EventKind.RESERVATION_STATUS_CHANGED]
+    reservation_id: NonEmpty
+    reservation_key: NonEmpty
+    scope: NonEmpty
+    resource_key: NonEmpty
+    previous: ReservationStatus | None = None
+    current: ReservationStatus
+    attempt_id: NonEmpty | None = None
+
+
 class ArtifactRecordedEvent(EventBase):
     kind: Literal[EventKind.ARTIFACT_RECORDED]
     artifact: Artifact
@@ -727,9 +780,12 @@ class HandoffRecordedEvent(EventBase):
 
 type Event = Annotated[
     RunStatusChangedEvent
+    | StageStatusChangedEvent
     | AttemptStatusChangedEvent
     | InterventionRequestedEvent
     | InterventionDeliveredEvent
+    | OutboxStatusChangedEvent
+    | ReservationStatusChangedEvent
     | ArtifactRecordedEvent
     | HandoffRecordedEvent,
     Field(discriminator="kind"),

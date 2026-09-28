@@ -1,0 +1,85 @@
+{
+  "$defs": {
+    "CommandOutcome": {
+      "enum": [
+        "accepted",
+        "rejected"
+      ],
+      "title": "CommandOutcome",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "command_id": {
+      "format": "uuid",
+      "title": "Command Id",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "event_sequences": {
+      "default": [],
+      "items": {
+        "type": "integer"
+      },
+      "title": "Event Sequences",
+      "type": "array"
+    },
+    "expected_revision": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expected Revision"
+    },
+    "outcome": {
+      "$ref": "#/$defs/CommandOutcome"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason"
+    },
+    "resulting_revision": {
+      "minimum": 0,
+      "title": "Resulting Revision",
+      "type": "integer"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "command_id",
+    "run_id",
+    "outcome",
+    "resulting_revision",
+    "created_at"
+  ],
+  "title": "CommandReceipt",
+  "type": "object"
+}

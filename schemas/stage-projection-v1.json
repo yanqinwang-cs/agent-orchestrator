@@ -1,0 +1,47 @@
+{
+  "$defs": {
+    "StageStatus": {
+      "enum": [
+        "pending",
+        "ready",
+        "running",
+        "succeeded",
+        "failed",
+        "skipped",
+        "blocked"
+      ],
+      "title": "StageStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "stage_id": {
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "title": "Stage Id",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/StageStatus"
+    },
+    "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "stage_id",
+    "status",
+    "updated_at"
+  ],
+  "title": "StageProjection",
+  "type": "object"
+}

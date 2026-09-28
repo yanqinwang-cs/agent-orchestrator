@@ -1,5 +1,135 @@
 {
   "$defs": {
+    "AgentRunSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_id": {
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "backend": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Backend",
+          "type": "string"
+        },
+        "effort": {
+          "$ref": "#/$defs/Effort"
+        },
+        "input_manifest": {
+          "items": {
+            "$ref": "#/$defs/InputEntry"
+          },
+          "title": "Input Manifest",
+          "type": "array"
+        },
+        "instructions": {
+          "minLength": 1,
+          "title": "Instructions",
+          "type": "string"
+        },
+        "model_id": {
+          "minLength": 1,
+          "title": "Model Id",
+          "type": "string"
+        },
+        "parent_attempt_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Attempt Id"
+        },
+        "permissions": {
+          "$ref": "#/$defs/PermissionSet"
+        },
+        "profile_id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Profile Id",
+          "type": "string"
+        },
+        "profile_version": {
+          "minLength": 1,
+          "title": "Profile Version",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "run_snapshot_hash": {
+          "minLength": 1,
+          "title": "Run Snapshot Hash",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "skills": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Skills",
+          "type": "array"
+        },
+        "tools": {
+          "items": {
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Tools",
+          "type": "array"
+        },
+        "workspace_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workspace Revision"
+        }
+      },
+      "required": [
+        "run_id",
+        "attempt_id",
+        "profile_id",
+        "profile_version",
+        "instructions",
+        "input_manifest",
+        "backend",
+        "model_id",
+        "effort",
+        "permissions",
+        "skills",
+        "tools",
+        "run_snapshot_hash"
+      ],
+      "title": "AgentRunSpec",
+      "type": "object"
+    },
+    "ApprovalMode": {
+      "enum": [
+        "deny_all"
+      ],
+      "title": "ApprovalMode",
+      "type": "string"
+    },
     "Artifact": {
       "additionalProperties": false,
       "properties": {
@@ -139,6 +269,148 @@
       "title": "ArtifactRecordedEvent",
       "type": "object"
     },
+    "ArtifactRegistration": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {
+          "$ref": "#/$defs/Artifact"
+        },
+        "size_bytes": {
+          "minimum": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact",
+        "size_bytes"
+      ],
+      "title": "ArtifactRegistration",
+      "type": "object"
+    },
+    "AttemptRegistration": {
+      "additionalProperties": false,
+      "properties": {
+        "slot_id": {
+          "minLength": 1,
+          "title": "Slot Id",
+          "type": "string"
+        },
+        "spec": {
+          "$ref": "#/$defs/AgentRunSpec"
+        },
+        "stage_id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Stage Id",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/AttemptState"
+        }
+      },
+      "required": [
+        "spec",
+        "stage_id",
+        "slot_id",
+        "state"
+      ],
+      "title": "AttemptRegistration",
+      "type": "object"
+    },
+    "AttemptState": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Artifact Ids",
+          "type": "array"
+        },
+        "attempt_id": {
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "error_class": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailureClass"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error_summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Summary"
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Finished At"
+        },
+        "receipt_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Receipt Id"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At"
+        },
+        "status": {
+          "$ref": "#/$defs/AttemptStatus"
+        }
+      },
+      "required": [
+        "attempt_id",
+        "status"
+      ],
+      "title": "AttemptState",
+      "type": "object"
+    },
     "AttemptStatus": {
       "enum": [
         "pending",
@@ -257,6 +529,77 @@
       ],
       "title": "AttemptStatusChangedEvent",
       "type": "object"
+    },
+    "Effort": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "title": "Effort",
+      "type": "string"
+    },
+    "Event": {
+      "discriminator": {
+        "mapping": {
+          "artifact_recorded": "#/$defs/ArtifactRecordedEvent",
+          "attempt_status_changed": "#/$defs/AttemptStatusChangedEvent",
+          "handoff_recorded": "#/$defs/HandoffRecordedEvent",
+          "intervention_delivered": "#/$defs/InterventionDeliveredEvent",
+          "intervention_requested": "#/$defs/InterventionRequestedEvent",
+          "outbox_status_changed": "#/$defs/OutboxStatusChangedEvent",
+          "reservation_status_changed": "#/$defs/ReservationStatusChangedEvent",
+          "run_status_changed": "#/$defs/RunStatusChangedEvent",
+          "stage_status_changed": "#/$defs/StageStatusChangedEvent"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/RunStatusChangedEvent"
+        },
+        {
+          "$ref": "#/$defs/StageStatusChangedEvent"
+        },
+        {
+          "$ref": "#/$defs/AttemptStatusChangedEvent"
+        },
+        {
+          "$ref": "#/$defs/InterventionRequestedEvent"
+        },
+        {
+          "$ref": "#/$defs/InterventionDeliveredEvent"
+        },
+        {
+          "$ref": "#/$defs/OutboxStatusChangedEvent"
+        },
+        {
+          "$ref": "#/$defs/ReservationStatusChangedEvent"
+        },
+        {
+          "$ref": "#/$defs/ArtifactRecordedEvent"
+        },
+        {
+          "$ref": "#/$defs/HandoffRecordedEvent"
+        }
+      ]
+    },
+    "FailureClass": {
+      "enum": [
+        "provider_transient",
+        "tool_transient",
+        "configuration",
+        "policy",
+        "timeout",
+        "invalid_output",
+        "worker_failure",
+        "cancelled"
+      ],
+      "title": "FailureClass",
+      "type": "string"
     },
     "Handoff": {
       "additionalProperties": false,
@@ -402,6 +745,38 @@
         "handoff"
       ],
       "title": "HandoffRecordedEvent",
+      "type": "object"
+    },
+    "InputEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "content_hash": {
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "source": {
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "content_hash",
+        "source",
+        "reason"
+      ],
+      "title": "InputEntry",
       "type": "object"
     },
     "Intervention": {
@@ -615,6 +990,70 @@
       "title": "InterventionRequestedEvent",
       "type": "object"
     },
+    "OutboxIntent": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "format": "uuid",
+          "title": "Action Id",
+          "type": "string"
+        },
+        "action_key": {
+          "minLength": 1,
+          "title": "Action Key",
+          "type": "string"
+        },
+        "kind": {
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": true,
+          "title": "Payload",
+          "type": "object"
+        }
+      },
+      "required": [
+        "action_id",
+        "action_key",
+        "kind",
+        "payload"
+      ],
+      "title": "OutboxIntent",
+      "type": "object"
+    },
+    "OutboxOutcomeChange": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "format": "uuid",
+          "title": "Action Id",
+          "type": "string"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Result"
+        },
+        "status": {
+          "$ref": "#/$defs/OutboxStatus"
+        }
+      },
+      "required": [
+        "action_id",
+        "status"
+      ],
+      "title": "OutboxOutcomeChange",
+      "type": "object"
+    },
     "OutboxStatus": {
       "enum": [
         "pending",
@@ -775,6 +1214,44 @@
       "title": "PauseIntervention",
       "type": "object"
     },
+    "PermissionSet": {
+      "additionalProperties": false,
+      "description": "Requested worker permissions; tool lists remain intentions, not enforcement.",
+      "properties": {
+        "approval_mode": {
+          "$ref": "#/$defs/ApprovalMode",
+          "default": "deny_all"
+        },
+        "external_integrations": {
+          "default": false,
+          "title": "External Integrations",
+          "type": "boolean"
+        },
+        "nested_agents": {
+          "default": false,
+          "title": "Nested Agents",
+          "type": "boolean"
+        },
+        "sandbox": {
+          "$ref": "#/$defs/SandboxMode"
+        },
+        "shell_network": {
+          "default": false,
+          "title": "Shell Network",
+          "type": "boolean"
+        },
+        "web_search": {
+          "default": false,
+          "title": "Web Search",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "sandbox"
+      ],
+      "title": "PermissionSet",
+      "type": "object"
+    },
     "RedirectIntervention": {
       "additionalProperties": false,
       "properties": {
@@ -833,6 +1310,78 @@
       ],
       "title": "RedirectIntervention",
       "type": "object"
+    },
+    "ReservationChange": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attempt Id"
+        },
+        "operation": {
+          "$ref": "#/$defs/ReservationOperation"
+        },
+        "reservation_id": {
+          "minLength": 1,
+          "title": "Reservation Id",
+          "type": "string"
+        },
+        "reservation_key": {
+          "minLength": 1,
+          "title": "Reservation Key",
+          "type": "string"
+        },
+        "resource_key": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resource Key"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scope"
+        }
+      },
+      "required": [
+        "operation",
+        "reservation_id",
+        "reservation_key"
+      ],
+      "title": "ReservationChange",
+      "type": "object"
+    },
+    "ReservationOperation": {
+      "enum": [
+        "reserve",
+        "release"
+      ],
+      "title": "ReservationOperation",
+      "type": "string"
     },
     "ReservationStatus": {
       "enum": [
@@ -1061,6 +1610,67 @@
       "title": "RetryIntervention",
       "type": "object"
     },
+    "RunProjectionUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "active_stages": {
+          "anyOf": [
+            {
+              "items": {
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9_-]*$",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Active Stages"
+        },
+        "attempts_used": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attempts Used"
+        },
+        "elapsed_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Elapsed Seconds"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "RunProjectionUpdate",
+      "type": "object"
+    },
     "RunStatus": {
       "enum": [
         "ready",
@@ -1173,6 +1783,14 @@
       ],
       "title": "RunStatusChangedEvent",
       "type": "object"
+    },
+    "SandboxMode": {
+      "enum": [
+        "read-only",
+        "workspace-write"
+      ],
+      "title": "SandboxMode",
+      "type": "string"
     },
     "StageStatus": {
       "enum": [
@@ -1290,6 +1908,26 @@
         "current"
       ],
       "title": "StageStatusChangedEvent",
+      "type": "object"
+    },
+    "StageUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "stage_id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Stage Id",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/StageStatus"
+        }
+      },
+      "required": [
+        "stage_id",
+        "status"
+      ],
+      "title": "StageUpdate",
       "type": "object"
     },
     "SteerIntervention": {
@@ -1452,47 +2090,130 @@
       "type": "object"
     }
   },
-  "discriminator": {
-    "mapping": {
-      "artifact_recorded": "#/$defs/ArtifactRecordedEvent",
-      "attempt_status_changed": "#/$defs/AttemptStatusChangedEvent",
-      "handoff_recorded": "#/$defs/HandoffRecordedEvent",
-      "intervention_delivered": "#/$defs/InterventionDeliveredEvent",
-      "intervention_requested": "#/$defs/InterventionRequestedEvent",
-      "outbox_status_changed": "#/$defs/OutboxStatusChangedEvent",
-      "reservation_status_changed": "#/$defs/ReservationStatusChangedEvent",
-      "run_status_changed": "#/$defs/RunStatusChangedEvent",
-      "stage_status_changed": "#/$defs/StageStatusChangedEvent"
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "minLength": 1,
+      "title": "Actor",
+      "type": "string"
     },
-    "propertyName": "kind"
-  },
-  "oneOf": [
-    {
-      "$ref": "#/$defs/RunStatusChangedEvent"
+    "artifacts": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ArtifactRegistration"
+      },
+      "title": "Artifacts",
+      "type": "array"
     },
-    {
-      "$ref": "#/$defs/StageStatusChangedEvent"
+    "attempt_creations": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/AttemptRegistration"
+      },
+      "title": "Attempt Creations",
+      "type": "array"
     },
-    {
-      "$ref": "#/$defs/AttemptStatusChangedEvent"
+    "attempt_updates": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/AttemptState"
+      },
+      "title": "Attempt Updates",
+      "type": "array"
     },
-    {
-      "$ref": "#/$defs/InterventionRequestedEvent"
+    "command_id": {
+      "format": "uuid",
+      "title": "Command Id",
+      "type": "string"
     },
-    {
-      "$ref": "#/$defs/InterventionDeliveredEvent"
+    "events": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Event"
+      },
+      "title": "Events",
+      "type": "array"
     },
-    {
-      "$ref": "#/$defs/OutboxStatusChangedEvent"
+    "expected_revision": {
+      "minimum": 0,
+      "title": "Expected Revision",
+      "type": "integer"
     },
-    {
-      "$ref": "#/$defs/ReservationStatusChangedEvent"
+    "handoffs": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Handoff"
+      },
+      "title": "Handoffs",
+      "type": "array"
     },
-    {
-      "$ref": "#/$defs/ArtifactRecordedEvent"
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
     },
-    {
-      "$ref": "#/$defs/HandoffRecordedEvent"
+    "outbox_actions": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/OutboxIntent"
+      },
+      "title": "Outbox Actions",
+      "type": "array"
+    },
+    "outbox_outcomes": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/OutboxOutcomeChange"
+      },
+      "title": "Outbox Outcomes",
+      "type": "array"
+    },
+    "reservations": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ReservationChange"
+      },
+      "title": "Reservations",
+      "type": "array"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "run_update": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RunProjectionUpdate"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "stage_updates": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/StageUpdate"
+      },
+      "title": "Stage Updates",
+      "type": "array"
     }
-  ]
+  },
+  "required": [
+    "command_id",
+    "run_id",
+    "expected_revision",
+    "actor",
+    "occurred_at"
+  ],
+  "title": "LedgerMutation",
+  "type": "object"
 }

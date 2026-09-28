@@ -1,0 +1,91 @@
+{
+  "$defs": {
+    "ReservationStatus": {
+      "enum": [
+        "held",
+        "released"
+      ],
+      "title": "ReservationStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "attempt_id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Attempt Id"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "released_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Released At"
+    },
+    "reservation_id": {
+      "minLength": 1,
+      "title": "Reservation Id",
+      "type": "string"
+    },
+    "reservation_key": {
+      "minLength": 1,
+      "title": "Reservation Key",
+      "type": "string"
+    },
+    "resource_key": {
+      "minLength": 1,
+      "title": "Resource Key",
+      "type": "string"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "scope": {
+      "minLength": 1,
+      "title": "Scope",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/ReservationStatus"
+    }
+  },
+  "required": [
+    "reservation_id",
+    "reservation_key",
+    "run_id",
+    "scope",
+    "resource_key",
+    "status",
+    "created_at"
+  ],
+  "title": "ReservationRecord",
+  "type": "object"
+}

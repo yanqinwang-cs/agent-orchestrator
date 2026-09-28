@@ -33,6 +33,15 @@ from orchestrator.domain.models import (
     WorkflowOverlayFile,
     WorkflowPreset,
 )
+from orchestrator.persistence.models import (
+    ArtifactManifest,
+    CommandReceipt,
+    LedgerMutation,
+    OutboxAction,
+    OwnerLease,
+    ReservationRecord,
+    StageProjection,
+)
 
 SCHEMAS: dict[str, Any] = {
     "agent-catalog-v1": AgentCatalog,
@@ -56,6 +65,13 @@ SCHEMAS: dict[str, Any] = {
     "development-config-v1": DevelopmentConfig,
     "profile-overlays-v1": ProfileOverlayFile,
     "workflow-overlays-v1": WorkflowOverlayFile,
+    "ledger-mutation-v1": LedgerMutation,
+    "command-receipt-v1": CommandReceipt,
+    "stage-projection-v1": StageProjection,
+    "outbox-action-v1": OutboxAction,
+    "reservation-v1": ReservationRecord,
+    "artifact-manifest-v1": ArtifactManifest,
+    "owner-lease-v1": OwnerLease,
 }
 
 
