@@ -9,7 +9,7 @@ from orchestrator.schemas import SCHEMAS, export_schemas
 def test_default_cli_does_not_claim_execution(capsys) -> None:
     assert main([]) == 0
     output = capsys.readouterr().out
-    assert "Execution and UI are not implemented yet" in output
+    assert "run CLI and UI are not implemented yet" in output
 
 
 def test_cli_validate_config_and_version(repo_root: Path, capsys) -> None:

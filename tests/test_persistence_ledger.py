@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 
 from orchestrator.artifacts import ArtifactPathError, ArtifactStore
+from orchestrator.domain.backend import ArtifactEntry, OutputStatus, WorkerResult
 from orchestrator.domain.models import (
     AgentRunSpec,
     AttemptState,
@@ -24,18 +25,21 @@ from orchestrator.domain.models import (
 from orchestrator.persistence import SQLiteLedger, UnsupportedSchemaVersion
 from orchestrator.persistence.ledger import (
     CommandIdConflict,
+    ImmutableSpecificationConflict,
     LedgerInvariantError,
     ReservationConflict,
 )
 from orchestrator.persistence.models import (
     ArtifactPublication,
     AttemptRegistration,
+    AttemptResultRegistration,
     LedgerMutation,
     OutboxIntent,
     OutboxStatus,
     ReservationChange,
     ReservationOperation,
     RunProjectionUpdate,
+    StageResult,
     StageUpdate,
 )
 from orchestrator.persistence.ownership import CoordinatorOwnership, OwnershipUnavailable
@@ -93,10 +97,10 @@ def test_database_is_versioned_and_survives_reopen(tmp_path) -> None:
     path = tmp_path / "orchestrator.sqlite3"
 
     with SQLiteLedger(path) as ledger:
-        assert ledger.schema_version == 1
+        assert ledger.schema_version == 2
 
     with SQLiteLedger(path) as reopened:
-        assert reopened.schema_version == 1
+        assert reopened.schema_version == 2
 
 
 def test_database_rejects_a_schema_newer_than_this_application(tmp_path) -> None:
@@ -106,6 +110,110 @@ def test_database_rejects_a_schema_newer_than_this_application(tmp_path) -> None
 
     with pytest.raises(UnsupportedSchemaVersion, match="999"):
         SQLiteLedger(path)
+
+
+def test_v1_database_receives_additive_stage_and_attempt_result_migration(tmp_path) -> None:
+    from orchestrator.persistence.migrations import MIGRATIONS
+
+    path = tmp_path / "legacy.sqlite3"
+    with sqlite3.connect(path) as connection:
+        MIGRATIONS[0][2](connection)
+        connection.execute(
+            "INSERT INTO schema_migrations(version, name, applied_at) VALUES (1, ?, ?)",
+            (MIGRATIONS[0][1], STAMP.isoformat()),
+        )
+        connection.execute("PRAGMA user_version = 1")
+
+    with SQLiteLedger(path) as ledger:
+        assert ledger.schema_version == 2
+    with sqlite3.connect(path) as connection:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(stages)").fetchall()}
+        assert "result_payload" in columns
+        assert (
+            connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'attempt_results'"
+            ).fetchone()
+            is not None
+        )
+
+
+def test_normalized_attempt_results_and_stage_outputs_survive_reopen_immutably(
+    tmp_path, app_config
+) -> None:
+    path = tmp_path / "results.sqlite3"
+    with SQLiteLedger(path) as ledger:
+        _, run_spec = _create_run(ledger, app_config)
+        output = ArtifactEntry(
+            name="report",
+            schema_id="review-report-v1",
+            content_hash="a" * 64,
+        )
+        worker_result = WorkerResult(
+            attempt_id="attempt-1",
+            input_revision="b" * 64,
+            status=OutputStatus.FAIL,
+            summary="valid report with findings",
+            artifacts=(output,),
+        )
+        stage_result = StageResult(
+            outputs=(output,),
+            result_status=OutputStatus.FAIL,
+        )
+        ledger.apply(
+            LedgerMutation(
+                command_id=uuid4(),
+                run_id="run-1",
+                expected_revision=0,
+                actor="coordinator",
+                occurred_at=STAMP,
+                attempt_creations=(
+                    AttemptRegistration(
+                        spec=_attempt_spec("run-1", run_spec.snapshot_hash),
+                        stage_id="review",
+                        slot_id="review/slot-01",
+                        state=AttemptState(
+                            attempt_id="attempt-1",
+                            status=AttemptStatus.SUCCEEDED,
+                            started_at=STAMP,
+                            finished_at=STAMP,
+                        ),
+                    ),
+                ),
+                attempt_results=(
+                    AttemptResultRegistration(attempt_id="attempt-1", result=worker_result),
+                ),
+                stage_updates=(
+                    StageUpdate(
+                        stage_id="review",
+                        status="succeeded",
+                        result=stage_result,
+                    ),
+                ),
+            )
+        )
+        first_attempt = ledger.get_attempt("attempt-1")
+        assert first_attempt.result is not None
+        assert first_attempt.result.result == worker_result
+        assert ledger.get_run("run-1").stages[0].result == stage_result
+        assert any(event.kind == "attempt_result_recorded" for event in ledger.list_events("run-1"))
+
+    with SQLiteLedger(path) as reopened:
+        assert reopened.get_attempt("attempt-1").result.result == worker_result
+        assert reopened.get_run("run-1").stages[0].result == stage_result
+        altered = worker_result.model_copy(update={"summary": "changed immutable evidence"})
+        with pytest.raises(ImmutableSpecificationConflict, match="another terminal result"):
+            reopened.apply(
+                LedgerMutation(
+                    command_id=uuid4(),
+                    run_id="run-1",
+                    expected_revision=1,
+                    actor="test",
+                    occurred_at=STAMP,
+                    attempt_results=(
+                        AttemptResultRegistration(attempt_id="attempt-1", result=altered),
+                    ),
+                )
+            )
 
 
 def test_immutable_run_and_project_snapshots_survive_reopen(tmp_path, app_config) -> None:

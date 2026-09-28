@@ -221,7 +221,34 @@ def _create_v1(connection: sqlite3.Connection) -> None:
         raise RuntimeError("incomplete SQL in the durable ledger migration")
 
 
-MIGRATIONS: tuple[Migration, ...] = ((1, "durable-run-ledger", _create_v1),)
+def _create_v2(connection: sqlite3.Connection) -> None:
+    connection.execute("ALTER TABLE stages ADD COLUMN result_payload TEXT")
+    connection.execute(
+        "CREATE TRIGGER stage_result_immutable BEFORE UPDATE OF result_payload ON stages "
+        "WHEN OLD.result_payload IS NOT NULL AND NEW.result_payload IS NOT OLD.result_payload "
+        "BEGIN SELECT RAISE(ABORT, 'completed stage outputs are immutable'); END"
+    )
+    connection.execute(
+        "CREATE TABLE attempt_results ("
+        "attempt_id TEXT PRIMARY KEY, result_payload TEXT, result_hash TEXT NOT NULL, "
+        "validation_error TEXT, created_at TEXT NOT NULL, "
+        "CHECK ((result_payload IS NULL) != (validation_error IS NULL)), "
+        "FOREIGN KEY (attempt_id) REFERENCES attempts(attempt_id))"
+    )
+    connection.execute(
+        "CREATE TRIGGER attempt_results_immutable_update BEFORE UPDATE ON attempt_results "
+        "BEGIN SELECT RAISE(ABORT, 'attempt result is immutable'); END"
+    )
+    connection.execute(
+        "CREATE TRIGGER attempt_results_immutable_delete BEFORE DELETE ON attempt_results "
+        "BEGIN SELECT RAISE(ABORT, 'attempt result is immutable'); END"
+    )
+
+
+MIGRATIONS: tuple[Migration, ...] = (
+    (1, "durable-run-ledger", _create_v1),
+    (2, "persist-worker-results-and-stage-outputs", _create_v2),
+)
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 

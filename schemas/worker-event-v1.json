@@ -42,6 +42,20 @@
       "title": "ArtifactEntry",
       "type": "object"
     },
+    "FailureClass": {
+      "enum": [
+        "provider_transient",
+        "tool_transient",
+        "configuration",
+        "policy",
+        "timeout",
+        "invalid_output",
+        "worker_failure",
+        "cancelled"
+      ],
+      "title": "FailureClass",
+      "type": "string"
+    },
     "OutputStatus": {
       "enum": [
         "pass",
@@ -141,6 +155,62 @@
         "reason"
       ],
       "title": "WorkerDisconnectedEvent",
+      "type": "object"
+    },
+    "WorkerFailureEvent": {
+      "additionalProperties": false,
+      "description": "A known terminal execution failure, classified before retry decisions.",
+      "properties": {
+        "attempt_id": {
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "failure_class": {
+          "$ref": "#/$defs/FailureClass"
+        },
+        "kind": {
+          "const": "failed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "occurred_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Occurred At"
+        },
+        "safe_to_retry": {
+          "default": false,
+          "title": "Safe To Retry",
+          "type": "boolean"
+        },
+        "sequence": {
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "summary": {
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "attempt_id",
+        "sequence",
+        "kind",
+        "failure_class",
+        "summary"
+      ],
+      "title": "WorkerFailureEvent",
       "type": "object"
     },
     "WorkerProgressEvent": {
@@ -377,6 +447,7 @@
   "discriminator": {
     "mapping": {
       "disconnected": "#/$defs/WorkerDisconnectedEvent",
+      "failed": "#/$defs/WorkerFailureEvent",
       "progress": "#/$defs/WorkerProgressEvent",
       "started": "#/$defs/WorkerStartedEvent",
       "terminal": "#/$defs/WorkerTerminalEvent"
@@ -395,6 +466,9 @@
     },
     {
       "$ref": "#/$defs/WorkerDisconnectedEvent"
+    },
+    {
+      "$ref": "#/$defs/WorkerFailureEvent"
     }
   ]
 }

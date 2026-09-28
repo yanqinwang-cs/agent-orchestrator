@@ -139,6 +139,133 @@
       "title": "ArtifactRecordedEvent",
       "type": "object"
     },
+    "AttemptResultRecordedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "minLength": 1,
+          "title": "Actor",
+          "type": "string"
+        },
+        "artifact_names": {
+          "default": [],
+          "items": {
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Artifact Names",
+          "type": "array"
+        },
+        "attempt_id": {
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "cause_event_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cause Event Id"
+        },
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "issue": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Issue"
+        },
+        "kind": {
+          "const": "attempt_result_recorded",
+          "title": "Kind",
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "result_hash": {
+          "minLength": 1,
+          "title": "Result Hash",
+          "type": "string"
+        },
+        "result_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "pass",
+                "fail",
+                "blocked"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Result Status"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "sequence": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sequence"
+        },
+        "valid": {
+          "title": "Valid",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "event_id",
+        "run_id",
+        "occurred_at",
+        "actor",
+        "kind",
+        "attempt_id",
+        "result_status",
+        "valid",
+        "result_hash"
+      ],
+      "title": "AttemptResultRecordedEvent",
+      "type": "object"
+    },
     "AttemptStatus": {
       "enum": [
         "pending",
@@ -1455,6 +1582,7 @@
   "discriminator": {
     "mapping": {
       "artifact_recorded": "#/$defs/ArtifactRecordedEvent",
+      "attempt_result_recorded": "#/$defs/AttemptResultRecordedEvent",
       "attempt_status_changed": "#/$defs/AttemptStatusChangedEvent",
       "handoff_recorded": "#/$defs/HandoffRecordedEvent",
       "intervention_delivered": "#/$defs/InterventionDeliveredEvent",
@@ -1475,6 +1603,9 @@
     },
     {
       "$ref": "#/$defs/AttemptStatusChangedEvent"
+    },
+    {
+      "$ref": "#/$defs/AttemptResultRecordedEvent"
     },
     {
       "$ref": "#/$defs/InterventionRequestedEvent"

@@ -12,6 +12,7 @@ from pydantic import Field
 from orchestrator.domain.models import (
     AttemptStatus,
     Effort,
+    FailureClass,
     FrozenModel,
     Identifier,
     NonEmpty,
@@ -127,6 +128,7 @@ class WorkerEventKind(StrEnum):
     STARTED = "started"
     PROGRESS = "progress"
     TERMINAL = "terminal"
+    FAILED = "failed"
     DISCONNECTED = "disconnected"
 
 
@@ -157,7 +159,20 @@ class WorkerDisconnectedEvent(WorkerEventBase):
     reason: NonEmpty
 
 
+class WorkerFailureEvent(WorkerEventBase):
+    """A known terminal execution failure, classified before retry decisions."""
+
+    kind: Literal[WorkerEventKind.FAILED]
+    failure_class: FailureClass
+    summary: NonEmpty
+    safe_to_retry: bool = False
+
+
 type WorkerEvent = Annotated[
-    WorkerStartedEvent | WorkerProgressEvent | WorkerTerminalEvent | WorkerDisconnectedEvent,
+    WorkerStartedEvent
+    | WorkerProgressEvent
+    | WorkerTerminalEvent
+    | WorkerDisconnectedEvent
+    | WorkerFailureEvent,
     Field(discriminator="kind"),
 ]

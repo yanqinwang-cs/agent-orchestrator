@@ -17,6 +17,7 @@ from orchestrator.domain.models import (
     ProjectConfig,
     ProjectSnapshot,
     ResolvedModelBinding,
+    ResolvedOrchestratorPolicy,
     ResolvedProfile,
     ResolvedRedirectRule,
     ResolvedStage,
@@ -427,6 +428,18 @@ def _freeze_workflow(workflow: WorkflowPreset, project_parallelism: int) -> Reso
         allowed_profiles=tuple(workflow.allowed_profiles),
         completion=workflow.completion,
         required_outputs=tuple(workflow.required_outputs),
+        policy=ResolvedOrchestratorPolicy(
+            allowed_backends=tuple(workflow.policy.allowed_backends),
+            allowed_model_bindings=tuple(workflow.policy.allowed_model_bindings),
+            allow_optional_skip=workflow.policy.allow_optional_skip,
+            allow_count_selection=workflow.policy.allow_count_selection,
+            allow_profile_selection=workflow.policy.allow_profile_selection,
+            allow_retry=workflow.policy.allow_retry,
+            allow_permission_expansion=workflow.policy.allow_permission_expansion,
+            allow_new_profiles=workflow.policy.allow_new_profiles,
+            allow_required_stage_removal=workflow.policy.allow_required_stage_removal,
+            permission_ceiling=workflow.policy.permission_ceiling,
+        ),
         allowed_redirects=tuple(
             ResolvedRedirectRule(stage=rule.stage, allowed_profiles=tuple(rule.allowed_profiles))
             for rule in workflow.allowed_redirects

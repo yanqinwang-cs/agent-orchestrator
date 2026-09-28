@@ -92,6 +92,11 @@
       "default": null,
       "title": "Receipt Id"
     },
+    "safe_to_retry": {
+      "default": false,
+      "title": "Safe To Retry",
+      "type": "boolean"
+    },
     "schema_version": {
       "const": 1,
       "default": 1,

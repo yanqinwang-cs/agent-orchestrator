@@ -180,6 +180,20 @@
       "title": "Skills",
       "type": "array"
     },
+    "stage_id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Stage Id"
+    },
     "tools": {
       "items": {
         "minLength": 1,

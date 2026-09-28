@@ -28,6 +28,7 @@ from orchestrator.domain.models import (
     OrchestratorPolicy,
     ProfileOverlayFile,
     ProjectConfig,
+    ResolvedOrchestratorPolicy,
     RunSpec,
     RunState,
     WorkflowOverlayFile,
@@ -35,18 +36,21 @@ from orchestrator.domain.models import (
 )
 from orchestrator.persistence.models import (
     ArtifactManifest,
+    AttemptResult,
     CommandReceipt,
     LedgerMutation,
     OutboxAction,
     OwnerLease,
     ReservationRecord,
     StageProjection,
+    StageResult,
 )
 
 SCHEMAS: dict[str, Any] = {
     "agent-catalog-v1": AgentCatalog,
     "workflow-preset-v1": WorkflowPreset,
     "orchestrator-policy-v1": OrchestratorPolicy,
+    "resolved-orchestrator-policy-v1": ResolvedOrchestratorPolicy,
     "project-config-v1": ProjectConfig,
     "backend-settings-v1": BackendSettings,
     "run-spec-v1": RunSpec,
@@ -68,6 +72,8 @@ SCHEMAS: dict[str, Any] = {
     "ledger-mutation-v1": LedgerMutation,
     "command-receipt-v1": CommandReceipt,
     "stage-projection-v1": StageProjection,
+    "stage-result-v1": StageResult,
+    "attempt-result-v1": AttemptResult,
     "outbox-action-v1": OutboxAction,
     "reservation-v1": ReservationRecord,
     "artifact-manifest-v1": ArtifactManifest,

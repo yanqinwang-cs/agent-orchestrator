@@ -1,4 +1,4 @@
-"""Small Milestone 1 CLI for config inspection; no worker execution exists."""
+"""Small configuration CLI; workflow execution currently has no CLI entry point."""
 
 from __future__ import annotations
 
@@ -17,7 +17,8 @@ def _parser() -> argparse.ArgumentParser:
         prog="agent-orchestrator",
         description=(
             "Validate Agent Orchestrator configuration. "
-            "Worker execution and UI are not implemented yet."
+            "Scripted fake execution is available through the Python API; the run CLI and UI "
+            "are not implemented yet."
         ),
         epilog="Command usage: agent-orchestrator validate-config PATH",
     )
@@ -32,7 +33,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     if args.command is None:
-        print("Execution and UI are not implemented yet (Milestone 1).")
+        print("The run CLI and UI are not implemented yet (Milestone 3).")
         print("Use --help or validate-config PATH to inspect configuration.")
         return 0
     if args.command == "validate-config":

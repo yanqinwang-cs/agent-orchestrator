@@ -453,6 +453,21 @@ class ResolvedRedirectRule(FrozenModel):
     allowed_profiles: tuple[Identifier, ...]
 
 
+class ResolvedOrchestratorPolicy(FrozenModel):
+    """Immutable policy snapshot required to make resumed scheduling decisions."""
+
+    allowed_backends: tuple[Identifier, ...] = ()
+    allowed_model_bindings: tuple[Identifier, ...] = ()
+    allow_optional_skip: bool = False
+    allow_count_selection: bool = False
+    allow_profile_selection: bool = False
+    allow_retry: bool = False
+    allow_permission_expansion: bool = False
+    allow_new_profiles: bool = False
+    allow_required_stage_removal: bool = False
+    permission_ceiling: PermissionSet | None = None
+
+
 class ResolvedWorkflow(FrozenModel):
     id: Identifier
     version: NonEmpty
@@ -465,6 +480,7 @@ class ResolvedWorkflow(FrozenModel):
     completion: WorkflowCompletion
     required_outputs: tuple[str, ...]
     allowed_redirects: tuple[ResolvedRedirectRule, ...]
+    policy: ResolvedOrchestratorPolicy = Field(default_factory=ResolvedOrchestratorPolicy)
     stages: tuple[ResolvedStage, ...]
     branch_outputs: tuple[tuple[str, tuple[tuple[str, str], ...]], ...]
 
@@ -518,6 +534,7 @@ class AgentRunSpec(FrozenModel):
     schema_version: Literal[1] = 1
     run_id: NonEmpty
     attempt_id: NonEmpty
+    stage_id: Identifier | None = None
     parent_attempt_id: str | None = None
     profile_id: Identifier
     profile_version: NonEmpty
@@ -602,6 +619,7 @@ class AttemptState(StrictModel):
     artifact_ids: list[str] = Field(default_factory=list)
     error_class: FailureClass | None = None
     error_summary: str | None = None
+    safe_to_retry: bool = False
 
 
 class Artifact(FrozenModel):
@@ -696,6 +714,7 @@ class EventKind(StrEnum):
     RUN_STATUS_CHANGED = "run_status_changed"
     STAGE_STATUS_CHANGED = "stage_status_changed"
     ATTEMPT_STATUS_CHANGED = "attempt_status_changed"
+    ATTEMPT_RESULT_RECORDED = "attempt_result_recorded"
     INTERVENTION_REQUESTED = "intervention_requested"
     INTERVENTION_DELIVERED = "intervention_delivered"
     OUTBOX_STATUS_CHANGED = "outbox_status_changed"
@@ -735,6 +754,16 @@ class AttemptStatusChangedEvent(EventBase):
     previous: AttemptStatus | None = None
     current: AttemptStatus
     reason: str | None = None
+
+
+class AttemptResultRecordedEvent(EventBase):
+    kind: Literal[EventKind.ATTEMPT_RESULT_RECORDED]
+    attempt_id: NonEmpty
+    result_status: Literal["pass", "fail", "blocked"] | None
+    valid: bool
+    result_hash: NonEmpty
+    artifact_names: tuple[Identifier, ...] = ()
+    issue: str | None = None
 
 
 class InterventionRequestedEvent(EventBase):
@@ -782,6 +811,7 @@ type Event = Annotated[
     RunStatusChangedEvent
     | StageStatusChangedEvent
     | AttemptStatusChangedEvent
+    | AttemptResultRecordedEvent
     | InterventionRequestedEvent
     | InterventionDeliveredEvent
     | OutboxStatusChangedEvent

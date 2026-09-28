@@ -17,10 +17,12 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, TypeAdapter
 from pydantic_core import to_jsonable_python
 
+from orchestrator.domain.backend import WorkerResult
 from orchestrator.domain.models import (
     AgentRunSpec,
     Artifact,
     ArtifactRecordedEvent,
+    AttemptResultRecordedEvent,
     AttemptState,
     AttemptStatus,
     AttemptStatusChangedEvent,
@@ -48,6 +50,8 @@ from orchestrator.persistence.models import (
     ArtifactPublication,
     ArtifactRegistration,
     AttemptRegistration,
+    AttemptResult,
+    AttemptResultRegistration,
     CommandOutcome,
     CommandReceipt,
     LedgerMutation,
@@ -61,6 +65,7 @@ from orchestrator.persistence.models import (
     ReservationOperation,
     ReservationRecord,
     StageProjection,
+    StageResult,
 )
 
 EVENT_ADAPTER: TypeAdapter[Event] = TypeAdapter(Event)
@@ -446,7 +451,7 @@ class SQLiteLedger:
                 elapsed_seconds=row["elapsed_seconds"],
             )
             projection_rows = connection.execute(
-                "SELECT stage_id, status, updated_at FROM stages WHERE run_id = ?",
+                "SELECT stage_id, status, updated_at, result_payload FROM stages WHERE run_id = ?",
                 (run_id,),
             ).fetchall()
             stage_by_id = {
@@ -454,6 +459,11 @@ class SQLiteLedger:
                     stage_id=item["stage_id"],
                     status=item["status"],
                     updated_at=datetime.fromisoformat(item["updated_at"]),
+                    result=(
+                        StageResult.model_validate(json.loads(item["result_payload"]))
+                        if item["result_payload"]
+                        else None
+                    ),
                 )
                 for item in projection_rows
             }
@@ -475,12 +485,62 @@ class SQLiteLedger:
             ).fetchone()
             if row is None:
                 raise KeyError(f"unknown attempt {attempt_id}")
-            return PersistedAttempt(
-                stage_id=row["stage_id"],
-                slot_id=row["slot_id"],
-                spec=AgentRunSpec.model_validate(json.loads(row["spec_payload"])),
-                state=AttemptState.model_validate(json.loads(row["state_payload"])),
+            result_row = connection.execute(
+                "SELECT * FROM attempt_results WHERE attempt_id = ?", (attempt_id,)
+            ).fetchone()
+            return self._attempt_from_rows(row, result_row)
+
+    def list_attempts(
+        self, run_id: str, stage_id: str | None = None
+    ) -> tuple[PersistedAttempt, ...]:
+        """Read persisted attempts and their immutable terminal results in stable order."""
+
+        with self._read_transaction() as connection:
+            if stage_id is None:
+                rows = connection.execute(
+                    "SELECT a.*, s.payload AS spec_payload FROM attempts a "
+                    "JOIN attempt_specs s ON s.spec_hash = a.spec_hash "
+                    "WHERE a.run_id = ? ORDER BY a.stage_id, a.slot_id, a.created_at, a.attempt_id",
+                    (run_id,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT a.*, s.payload AS spec_payload FROM attempts a "
+                    "JOIN attempt_specs s ON s.spec_hash = a.spec_hash "
+                    "WHERE a.run_id = ? AND a.stage_id = ? "
+                    "ORDER BY a.slot_id, a.created_at, a.attempt_id",
+                    (run_id, stage_id),
+                ).fetchall()
+            attempts: list[PersistedAttempt] = []
+            for row in rows:
+                result_row = connection.execute(
+                    "SELECT * FROM attempt_results WHERE attempt_id = ?", (row["attempt_id"],)
+                ).fetchone()
+                attempts.append(self._attempt_from_rows(row, result_row))
+            return tuple(attempts)
+
+    def _attempt_from_rows(
+        self, row: sqlite3.Row, result_row: sqlite3.Row | None
+    ) -> PersistedAttempt:
+        result = None
+        if result_row is not None:
+            result = AttemptResult(
+                result=(
+                    WorkerResult.model_validate(json.loads(result_row["result_payload"]))
+                    if result_row["result_payload"]
+                    else None
+                ),
+                result_hash=result_row["result_hash"],
+                validation_error=result_row["validation_error"],
+                recorded_at=datetime.fromisoformat(result_row["created_at"]),
             )
+        return PersistedAttempt(
+            stage_id=row["stage_id"],
+            slot_id=row["slot_id"],
+            spec=AgentRunSpec.model_validate(json.loads(row["spec_payload"])),
+            state=AttemptState.model_validate(json.loads(row["state_payload"])),
+            result=result,
+        )
 
     def apply(self, mutation: LedgerMutation) -> CommandReceipt:
         """Apply a revision-checked mutation, events, ownership and outbox atomically."""
@@ -574,6 +634,8 @@ class SQLiteLedger:
                 self._register_attempt(connection, mutation, attempt_registration, generated_events)
             for state in mutation.attempt_updates:
                 self._update_attempt(connection, mutation, state, generated_events)
+            for result in mutation.attempt_results:
+                self._register_attempt_result(connection, mutation, result, generated_events)
 
             for artifact_registration in mutation.artifacts:
                 if self._insert_artifact_manifest(
@@ -633,7 +695,7 @@ class SQLiteLedger:
 
             for update in mutation.stage_updates:
                 row = connection.execute(
-                    "SELECT status FROM stages WHERE run_id = ? AND stage_id = ?",
+                    "SELECT status, result_payload FROM stages WHERE run_id = ? AND stage_id = ?",
                     (mutation.run_id, update.stage_id),
                 ).fetchone()
                 if row is None:
@@ -641,12 +703,22 @@ class SQLiteLedger:
                         f"run {mutation.run_id} references missing stage {update.stage_id}"
                     )
                 previous = StageStatus(row["status"])
+                result_payload = (
+                    canonical_json(update.result)
+                    if update.result is not None
+                    else row["result_payload"]
+                )
+                if row["result_payload"] is not None and result_payload != row["result_payload"]:
+                    raise LedgerInvariantError(
+                        f"stage {update.stage_id} already has immutable output evidence"
+                    )
                 connection.execute(
-                    "UPDATE stages SET status = ?, updated_at = ? "
+                    "UPDATE stages SET status = ?, updated_at = ?, result_payload = ? "
                     "WHERE run_id = ? AND stage_id = ?",
                     (
                         update.status.value,
                         _iso(mutation.occurred_at),
+                        result_payload,
                         mutation.run_id,
                         update.stage_id,
                     ),
@@ -799,6 +871,78 @@ class SQLiteLedger:
                 )
             )
 
+    def _register_attempt_result(
+        self,
+        connection: sqlite3.Connection,
+        mutation: LedgerMutation,
+        registration: AttemptResultRegistration,
+        generated_events: list[Event],
+    ) -> None:
+        attempt = connection.execute(
+            "SELECT status FROM attempts WHERE attempt_id = ? AND run_id = ?",
+            (registration.attempt_id, mutation.run_id),
+        ).fetchone()
+        if attempt is None:
+            raise LedgerInvariantError(
+                f"run {mutation.run_id} has no attempt {registration.attempt_id}"
+            )
+        status = AttemptStatus(attempt["status"])
+        if registration.result is not None and status != AttemptStatus.SUCCEEDED:
+            raise LedgerInvariantError("a valid worker result requires a succeeded attempt")
+        if registration.validation_error is not None and status != AttemptStatus.FAILED:
+            raise LedgerInvariantError("an invalid worker result requires a failed attempt")
+
+        payload = canonical_json(registration.result) if registration.result is not None else None
+        validation_error = registration.validation_error
+        result_hash = content_hash(
+            payload or canonical_json({"validation_error": validation_error})
+        )
+        existing = connection.execute(
+            "SELECT result_payload, result_hash, validation_error FROM attempt_results "
+            "WHERE attempt_id = ?",
+            (registration.attempt_id,),
+        ).fetchone()
+        if existing is not None:
+            if (
+                existing["result_payload"] != payload
+                or existing["result_hash"] != result_hash
+                or existing["validation_error"] != validation_error
+            ):
+                raise ImmutableSpecificationConflict(
+                    f"attempt {registration.attempt_id} already has another terminal result"
+                )
+            return
+
+        connection.execute(
+            "INSERT INTO attempt_results(attempt_id, result_payload, result_hash, "
+            "validation_error, created_at) VALUES (?, ?, ?, ?, ?)",
+            (
+                registration.attempt_id,
+                payload,
+                result_hash,
+                validation_error,
+                _iso(mutation.occurred_at),
+            ),
+        )
+        result = registration.result
+        generated_events.append(
+            AttemptResultRecordedEvent(
+                event_id=uuid4(),
+                run_id=mutation.run_id,
+                occurred_at=mutation.occurred_at,
+                actor=mutation.actor,
+                kind=EventKind.ATTEMPT_RESULT_RECORDED,
+                attempt_id=registration.attempt_id,
+                result_status=result.status.value if result is not None else None,
+                valid=result is not None,
+                result_hash=result_hash,
+                artifact_names=tuple(artifact.name for artifact in result.artifacts)
+                if result is not None
+                else (),
+                issue=validation_error,
+            )
+        )
+
     def _insert_outbox(
         self, connection: sqlite3.Connection, mutation: LedgerMutation, intent: OutboxIntent
     ) -> None:
@@ -879,6 +1023,23 @@ class SQLiteLedger:
                 raise ReservationConflict(
                     f"reservation key {change.reservation_key} already exists"
                 )
+            if change.capacity_limit is not None:
+                active = connection.execute(
+                    "SELECT COUNT(*) AS count FROM reservations "
+                    "WHERE scope = ? AND resource_key = ? AND status = ?",
+                    (change.scope, change.resource_key, ReservationStatus.HELD.value),
+                ).fetchone()["count"]
+                unreserved = self._count_active_unreserved(
+                    connection,
+                    scope=change.scope or "",
+                    resource_key=change.resource_key or "",
+                    excluding_attempt_id=change.attempt_id,
+                )
+                if active + unreserved >= change.capacity_limit:
+                    raise ReservationConflict(
+                        f"{change.scope} capacity is full for {change.resource_key} "
+                        f"({active + unreserved}/{change.capacity_limit})"
+                    )
             connection.execute(
                 "INSERT INTO reservations(reservation_id, reservation_key, run_id, "
                 "attempt_id, scope, "
@@ -949,6 +1110,54 @@ class SQLiteLedger:
             current=ReservationStatus.RELEASED,
             attempt_id=attempt_id,
         )
+
+    @staticmethod
+    def _count_active_unreserved(
+        connection: sqlite3.Connection,
+        *,
+        scope: str,
+        resource_key: str,
+        excluding_attempt_id: str | None,
+    ) -> int:
+        if scope == "project":
+            scope_filter = "AND runs.project_id = ?"
+            scope_value = resource_key
+        elif scope == "run":
+            scope_filter = "AND attempts.run_id = ?"
+            scope_value = resource_key
+        elif scope == "stage":
+            scope_filter = "AND attempts.run_id || '/' || attempts.stage_id = ?"
+            scope_value = resource_key
+        elif scope == "global":
+            scope_filter = ""
+            scope_value = None
+        else:
+            return 0
+        exclusion = "AND attempts.attempt_id != ?" if excluding_attempt_id else ""
+        parameters: list[str] = [
+            AttemptStatus.LAUNCHING.value,
+            AttemptStatus.RUNNING.value,
+            AttemptStatus.CANCEL_REQUESTED.value,
+            AttemptStatus.OUTCOME_UNKNOWN.value,
+            scope,
+            resource_key,
+        ]
+        if scope_value is not None:
+            parameters.append(scope_value)
+        if excluding_attempt_id is not None:
+            parameters.append(excluding_attempt_id)
+        row = connection.execute(
+            "SELECT COUNT(*) AS count FROM attempts "
+            "JOIN runs ON runs.run_id = attempts.run_id "
+            "WHERE attempts.status IN (?, ?, ?, ?) "
+            "AND NOT EXISTS (SELECT 1 FROM reservations "
+            "WHERE reservations.attempt_id = attempts.attempt_id "
+            "AND reservations.scope = ? AND reservations.resource_key = ? "
+            "AND reservations.status = 'held') "
+            f"{scope_filter} {exclusion}",
+            parameters,
+        ).fetchone()
+        return int(row["count"])
 
     def _insert_handoff(
         self,
@@ -1331,17 +1540,24 @@ class SQLiteLedger:
         )
 
     def claim_next_outbox(
-        self, owner_id: str, occurred_at: datetime | None = None
+        self, owner_id: str, occurred_at: datetime | None = None, *, run_id: str | None = None
     ) -> OutboxAction | None:
         """Mark one pending action claimed; claimed/unknown actions are never selected again."""
 
         now = occurred_at or _now()
         with self._transaction() as connection:
-            row = connection.execute(
-                "SELECT * FROM outbox_actions WHERE status = ? "
-                "ORDER BY created_at, action_id LIMIT 1",
-                (OutboxStatus.PENDING.value,),
-            ).fetchone()
+            if run_id is None:
+                row = connection.execute(
+                    "SELECT * FROM outbox_actions WHERE status = ? "
+                    "ORDER BY created_at, action_id LIMIT 1",
+                    (OutboxStatus.PENDING.value,),
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    "SELECT * FROM outbox_actions WHERE status = ? AND run_id = ? "
+                    "ORDER BY created_at, action_id LIMIT 1",
+                    (OutboxStatus.PENDING.value, run_id),
+                ).fetchone()
             if row is None:
                 return None
             run_row = connection.execute(
@@ -1414,12 +1630,18 @@ class SQLiteLedger:
             )
         )
 
-    def list_reservations(self, run_id: str) -> tuple[ReservationRecord, ...]:
+    def list_reservations(self, run_id: str | None = None) -> tuple[ReservationRecord, ...]:
         with self._read_transaction() as connection:
-            rows = connection.execute(
-                "SELECT * FROM reservations WHERE run_id = ? ORDER BY created_at, reservation_id",
-                (run_id,),
-            ).fetchall()
+            if run_id is None:
+                rows = connection.execute(
+                    "SELECT * FROM reservations ORDER BY created_at, reservation_id"
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM reservations WHERE run_id = ? "
+                    "ORDER BY created_at, reservation_id",
+                    (run_id,),
+                ).fetchall()
             return tuple(
                 ReservationRecord(
                     reservation_id=row["reservation_id"],

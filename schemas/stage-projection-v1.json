@@ -1,5 +1,116 @@
 {
   "$defs": {
+    "ArtifactEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "content_hash": {
+          "minLength": 1,
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "relative_path": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Relative Path"
+        },
+        "schema_id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Schema Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "schema_id",
+        "content_hash"
+      ],
+      "title": "ArtifactEntry",
+      "type": "object"
+    },
+    "OutputStatus": {
+      "enum": [
+        "pass",
+        "fail",
+        "blocked"
+      ],
+      "title": "OutputStatus",
+      "type": "string"
+    },
+    "StageResult": {
+      "additionalProperties": false,
+      "properties": {
+        "decision": {
+          "anyOf": [
+            {
+              "enum": [
+                "repair_needed",
+                "repair_not_needed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decision"
+        },
+        "outputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ArtifactEntry"
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "result_status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutputStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "workspace_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workspace Revision"
+        }
+      },
+      "title": "StageResult",
+      "type": "object"
+    },
     "StageStatus": {
       "enum": [
         "pending",
@@ -16,6 +127,17 @@
   },
   "additionalProperties": false,
   "properties": {
+    "result": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/StageResult"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "schema_version": {
       "const": 1,
       "default": 1,

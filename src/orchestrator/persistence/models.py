@@ -9,6 +9,7 @@ from uuid import UUID
 
 from pydantic import Field, model_validator
 
+from orchestrator.domain.backend import ArtifactEntry, OutputStatus, WorkerResult
 from orchestrator.domain.models import (
     AgentRunSpec,
     Artifact,
@@ -28,9 +29,18 @@ from orchestrator.domain.models import (
 )
 
 
+class StageResult(FrozenModel):
+    schema_version: Literal[1] = 1
+    outputs: tuple[ArtifactEntry, ...] = ()
+    result_status: OutputStatus | None = None
+    workspace_revision: str | None = None
+    decision: Literal["repair_needed", "repair_not_needed"] | None = None
+
+
 class StageUpdate(FrozenModel):
     stage_id: Identifier
     status: StageStatus
+    result: StageResult | None = None
 
 
 class StageProjection(FrozenModel):
@@ -38,6 +48,7 @@ class StageProjection(FrozenModel):
     stage_id: Identifier
     status: StageStatus
     updated_at: datetime
+    result: StageResult | None = None
 
 
 class RunProjectionUpdate(FrozenModel):
@@ -57,6 +68,34 @@ class AttemptRegistration(FrozenModel):
     def check_identity(self) -> AttemptRegistration:
         if self.spec.attempt_id != self.state.attempt_id:
             raise ValueError("attempt specification and state IDs must match")
+        return self
+
+
+class AttemptResultRegistration(FrozenModel):
+    attempt_id: NonEmpty
+    result: WorkerResult | None = None
+    validation_error: NonEmpty | None = None
+
+    @model_validator(mode="after")
+    def check_result_shape(self) -> AttemptResultRegistration:
+        if (self.result is None) == (self.validation_error is None):
+            raise ValueError("provide either a validated result or a validation error")
+        if self.result is not None and self.result.attempt_id != self.attempt_id:
+            raise ValueError("worker result and attempt IDs must match")
+        return self
+
+
+class AttemptResult(FrozenModel):
+    schema_version: Literal[1] = 1
+    result: WorkerResult | None = None
+    result_hash: NonEmpty
+    validation_error: str | None = None
+    recorded_at: datetime
+
+    @model_validator(mode="after")
+    def check_result_shape(self) -> AttemptResult:
+        if (self.result is None) == (self.validation_error is None):
+            raise ValueError("persisted result must be valid or carry a validation error")
         return self
 
 
@@ -111,6 +150,7 @@ class ReservationChange(FrozenModel):
     attempt_id: NonEmpty | None = None
     scope: NonEmpty | None = None
     resource_key: NonEmpty | None = None
+    capacity_limit: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def check_reservation_shape(self) -> ReservationChange:
@@ -194,6 +234,7 @@ class LedgerMutation(FrozenModel):
     stage_updates: tuple[StageUpdate, ...] = ()
     attempt_creations: tuple[AttemptRegistration, ...] = ()
     attempt_updates: tuple[AttemptState, ...] = ()
+    attempt_results: tuple[AttemptResultRegistration, ...] = ()
     events: tuple[Event, ...] = ()
     outbox_actions: tuple[OutboxIntent, ...] = ()
     outbox_outcomes: tuple[OutboxOutcomeChange, ...] = ()
@@ -208,6 +249,9 @@ class LedgerMutation(FrozenModel):
             raise ValueError("a mutation can update each stage only once")
         attempt_ids = [item.spec.attempt_id for item in self.attempt_creations]
         attempt_ids.extend(item.attempt_id for item in self.attempt_updates)
+        result_attempt_ids = [item.attempt_id for item in self.attempt_results]
+        if len(result_attempt_ids) != len(set(result_attempt_ids)):
+            raise ValueError("a mutation can record each attempt result only once")
         if len(attempt_ids) != len(set(attempt_ids)):
             raise ValueError("a mutation can update each attempt only once")
         action_ids = [item.action_id for item in self.outbox_actions]
@@ -235,3 +279,4 @@ class PersistedAttempt(FrozenModel):
     slot_id: NonEmpty
     spec: AgentRunSpec
     state: AttemptState
+    result: AttemptResult | None = None

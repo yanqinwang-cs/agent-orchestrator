@@ -1,6 +1,6 @@
-# Agent Orchestrator — Milestones 1–2 foundation
+# Agent Orchestrator — Milestones 1–3 foundation
 
-Milestones 1–2 supply typed configuration, static validation, deterministic run resolution, versioned JSON Schemas, fake worker contracts, and the durable local run ledger. Scheduling, worker execution, live Codex integration and the web UI are not implemented yet.
+Milestones 1–3 supply typed configuration, static validation, deterministic run resolution, versioned JSON Schemas, a durable local run ledger, and a bounded coordinator that executes the six shipped workflows with scripted fake workers. The CLI still provides setup and validation commands only; real Codex execution, project worktrees and the web UI are later milestones.
 
 **Decision:** a small deterministic Python coordinator, SQLite, the official Python Codex SDK, and a FastAPI/Jinja local UI. The coordinator owns workflow state; Codex owns each worker's model, tools and authentication. No coordinator model is required in v1.
 
@@ -8,7 +8,7 @@ Start with [the implementation plan](docs/IMPLEMENTATION_PLAN.md). It contains t
 
 ## Set up and validate
 
-Use Python 3.12+ and [uv](https://docs.astral.sh/uv/getting-started/installation/). SQLite comes with Python. The first two milestones do not need Node, Codex sign-in, or live model access.
+Use Python 3.12+ and [uv](https://docs.astral.sh/uv/getting-started/installation/). SQLite comes with Python. The first three milestones do not need Node, Codex sign-in, or live model access.
 
 Install the locked development dependencies and validate the shipped configuration:
 
@@ -31,7 +31,7 @@ uv run agent-orchestrator --version
 uv run agent-orchestrator validate-config config/project.example.toml
 ```
 
-With no subcommand, the CLI reports that execution and the UI are not implemented. It does not start a placeholder dashboard. The default test suite uses only local fixtures and fake workers; live provider calls are not a test dependency.
+With no subcommand, the CLI reports that run commands and the UI are not implemented. It does not start a placeholder dashboard. The default test suite uses only local fixtures and fake workers; live provider calls are not a test dependency.
 
 ## Package map
 
@@ -48,7 +48,7 @@ With no subcommand, the CLI reports that execution and the UI are not implemente
 | `docs/INTEGRATION_AUDIT.md` | Runtime choice, Codex integration and evidence boundaries |
 | `docs/DEVELOPMENT.md` | Development presets, skills and dependency policy |
 | `tasks/01-foundation.md` | Exact first implementation task |
-| `src/orchestrator/` | Versioned models, config validation, pure resolver, CLI, fake backend, SQLite ledger and artifact store |
+| `src/orchestrator/` | Versioned models, config validation, pure resolver, bounded execution coordinator, CLI, fake backend, SQLite ledger and artifact store |
 | `schemas/` | JSON Schemas generated from the Pydantic models |
 | `tests/` | Offline schema, resolver, validation, CLI and fake-backend tests |
 
@@ -56,6 +56,14 @@ The application TOML files are schema-v1 product fixtures. `config/development.t
 
 ## Durable storage
 
-`SQLiteLedger` owns a versioned SQLite database with foreign keys, WAL mode, full synchronous commits and a configurable busy timeout. One revision-checked transaction writes projections, attributable events, command receipts, reservations and outbox intent together. Resolved run and attempt specifications and project configuration revisions are content-addressed immutable records.
+`SQLiteLedger` owns a versioned SQLite database with foreign keys, WAL mode, full synchronous commits and a configurable busy timeout. One revision-checked transaction writes projections, attributable events, command receipts, reservations and outbox intent together. Resolved run and attempt specifications and project configuration revisions are content-addressed immutable records. Schema v2 also preserves normalized worker results and completed stage outputs so joins and repair decisions can be reconstructed after reopen.
 
 `CoordinatorOwnership` combines an OS file lock with a persisted owner generation. `claim_next_outbox` marks an action claimed before any later dispatcher performs an external effect. A claimed action stays distinguishable from pending after restart and is not blindly selected again; reconciliation is a later milestone. `ArtifactStore` writes and hashes bytes under `runs/<run>/attempts/<attempt>/artifacts/`, atomically renames the completed file, then commits its manifest and event. A crash between rename and the SQLite commit can leave an unreferenced content-addressed file, but cannot publish a manifest for incomplete bytes.
+
+## Bounded fake execution
+
+`ExecutionCoordinator` advances only from the persisted resolved run, stage projections, attempt lineage and durable reservations. It uses stable workflow and slot order, frozen fixed/select-one/elastic selections, the frozen workflow policy, and global/project/run/stage reservations. Attempt specifications, capacity reservations and launch intents commit together. Dispatch claims the outbox action before calling the backend, then records acknowledgement separately. Known classified failures may retry within both workflow and profile limits; unknown launch ownership keeps its reservations and is never replayed automatically.
+
+The scripted `FakeBackend` can hold start acknowledgements and worker events on explicit barriers. Its manual clock supports deterministic timeout tests. The end-to-end suite drives Review, Prototype, Feature, Debug, Research and Final handoff offline, including both Feature branches.
+
+The normalized worker envelope currently contains output names, schema IDs, hashes and a summary, but no report or patch bytes and no registry of stage-specific body schemas. The coordinator checks envelope identity, input/workspace revisions, required output names, hash shape and safe relative paths. It cannot inspect report sections or verify that a summary labels limitations or unresolved claims. Content-level validation must be specified before the real workspace and worker milestones.

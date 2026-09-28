@@ -1,0 +1,129 @@
+{
+  "$defs": {
+    "ApprovalMode": {
+      "enum": [
+        "deny_all"
+      ],
+      "title": "ApprovalMode",
+      "type": "string"
+    },
+    "PermissionSet": {
+      "additionalProperties": false,
+      "description": "Requested worker permissions; tool lists remain intentions, not enforcement.",
+      "properties": {
+        "approval_mode": {
+          "$ref": "#/$defs/ApprovalMode",
+          "default": "deny_all"
+        },
+        "external_integrations": {
+          "default": false,
+          "title": "External Integrations",
+          "type": "boolean"
+        },
+        "nested_agents": {
+          "default": false,
+          "title": "Nested Agents",
+          "type": "boolean"
+        },
+        "sandbox": {
+          "$ref": "#/$defs/SandboxMode"
+        },
+        "shell_network": {
+          "default": false,
+          "title": "Shell Network",
+          "type": "boolean"
+        },
+        "web_search": {
+          "default": false,
+          "title": "Web Search",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "sandbox"
+      ],
+      "title": "PermissionSet",
+      "type": "object"
+    },
+    "SandboxMode": {
+      "enum": [
+        "read-only",
+        "workspace-write"
+      ],
+      "title": "SandboxMode",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Immutable policy snapshot required to make resumed scheduling decisions.",
+  "properties": {
+    "allow_count_selection": {
+      "default": false,
+      "title": "Allow Count Selection",
+      "type": "boolean"
+    },
+    "allow_new_profiles": {
+      "default": false,
+      "title": "Allow New Profiles",
+      "type": "boolean"
+    },
+    "allow_optional_skip": {
+      "default": false,
+      "title": "Allow Optional Skip",
+      "type": "boolean"
+    },
+    "allow_permission_expansion": {
+      "default": false,
+      "title": "Allow Permission Expansion",
+      "type": "boolean"
+    },
+    "allow_profile_selection": {
+      "default": false,
+      "title": "Allow Profile Selection",
+      "type": "boolean"
+    },
+    "allow_required_stage_removal": {
+      "default": false,
+      "title": "Allow Required Stage Removal",
+      "type": "boolean"
+    },
+    "allow_retry": {
+      "default": false,
+      "title": "Allow Retry",
+      "type": "boolean"
+    },
+    "allowed_backends": {
+      "default": [],
+      "items": {
+        "minLength": 1,
+        "pattern": "^[a-z][a-z0-9_-]*$",
+        "type": "string"
+      },
+      "title": "Allowed Backends",
+      "type": "array"
+    },
+    "allowed_model_bindings": {
+      "default": [],
+      "items": {
+        "minLength": 1,
+        "pattern": "^[a-z][a-z0-9_-]*$",
+        "type": "string"
+      },
+      "title": "Allowed Model Bindings",
+      "type": "array"
+    },
+    "permission_ceiling": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PermissionSet"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "title": "ResolvedOrchestratorPolicy",
+  "type": "object"
+}
