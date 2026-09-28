@@ -1,0 +1,6 @@
+schema_version = 1
+
+[[workflows]]
+workflow_id = "prototype"
+default_profiles = { implement = "researcher" }
+

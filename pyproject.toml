@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling>=1.26,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-orchestrator"
+version = "0.1.0"
+description = "A deterministic local orchestration foundation for specialist workers"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["pydantic>=2.10,<3"]
+
+[project.scripts]
+agent-orchestrator = "orchestrator.cli:main"
+
+[dependency-groups]
+dev = [
+  "mypy>=1.13,<2",
+  "pytest>=8.3,<9",
+  "pytest-asyncio>=0.24,<2",
+  "ruff>=0.8,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/orchestrator"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = ["live: tests that make explicitly authorized live provider calls"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["scripts/check_starter.py", "scripts/codex_task.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "src"
+packages = ["orchestrator"]
+show_error_codes = true
+warn_unused_configs = true

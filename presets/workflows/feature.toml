@@ -1,0 +1,189 @@
+# Proposed WorkflowPreset schema v1. Conditions and stage kinds are closed enums.
+schema_version = 1
+id = "feature"
+version = "1.0.0"
+name = "Feature development"
+max_parallelism = 4
+max_duration_seconds = 10800
+max_attempts_per_slot = 2
+max_repair_cycles = 1
+allowed_profiles = ["planner", "implementer", "reviewer", "tester", "handoff"]
+completion = "verified_revision"
+required_outputs = ["handoff.summary"]
+allowed_redirects = []
+
+[policy]
+allowed_backends = ["codex"]
+allowed_model_bindings = ["standard", "deep", "fast"]
+allow_optional_skip = true
+allow_count_selection = true
+allow_profile_selection = false
+allow_retry = true
+allow_permission_expansion = false
+allow_new_profiles = false
+allow_required_stage_removal = false
+
+[branch_outputs.repair_not_needed]
+revision = "integrate.revision"
+review = "review.report"
+test = "test.report"
+
+[branch_outputs.repair_needed]
+revision = "integrate_repair.revision"
+review = "rereview.report"
+test = "retest.report"
+
+[[stages]]
+id = "plan"
+kind = "worker"
+depends_on = []
+inputs = ["task"]
+required_outputs = ["plan"]
+when = "always"
+optional = false
+completion = "artifact_ready"
+slot_kind = "fixed"
+min_workers = 1
+max_workers = 1
+allowed_profiles = ["planner"]
+default_profile = "planner"
+
+[[stages]]
+id = "implement"
+kind = "worker"
+depends_on = ["plan"]
+inputs = ["task", "plan.plan"]
+required_outputs = ["changes"]
+when = "always"
+optional = false
+completion = "artifact_ready"
+slot_kind = "elastic"
+min_workers = 1
+max_workers = 3
+allowed_profiles = ["implementer"]
+default_profile = "implementer"
+parallel_group = "implementation"
+
+[[stages]]
+id = "integrate"
+kind = "integrate"
+depends_on = ["implement"]
+inputs = ["implement.changes"]
+required_outputs = ["revision"]
+when = "always"
+optional = false
+completion = "integration_succeeded"
+
+[[stages]]
+id = "review"
+kind = "worker"
+depends_on = ["integrate"]
+inputs = ["task", "plan.plan", "integrate.revision"]
+required_outputs = ["report"]
+when = "always"
+optional = false
+completion = "report_present"
+slot_kind = "fixed"
+min_workers = 1
+max_workers = 1
+allowed_profiles = ["reviewer"]
+default_profile = "reviewer"
+parallel_group = "checks"
+
+[[stages]]
+id = "test"
+kind = "worker"
+depends_on = ["integrate"]
+inputs = ["task", "plan.plan", "integrate.revision"]
+required_outputs = ["report"]
+when = "always"
+optional = false
+completion = "report_present"
+slot_kind = "fixed"
+min_workers = 1
+max_workers = 1
+allowed_profiles = ["tester"]
+default_profile = "tester"
+parallel_group = "checks"
+
+[[stages]]
+id = "repair_gate"
+kind = "repair_gate"
+depends_on = ["review", "test"]
+inputs = ["review.report", "test.report"]
+required_outputs = ["decision"]
+when = "always"
+optional = false
+completion = "decision_recorded"
+
+[[stages]]
+id = "repair"
+kind = "worker"
+depends_on = ["repair_gate"]
+inputs = ["task", "integrate.revision", "review.report", "test.report"]
+required_outputs = ["changes"]
+when = "repair_needed"
+optional = true
+completion = "artifact_ready"
+slot_kind = "fixed"
+min_workers = 1
+max_workers = 1
+allowed_profiles = ["implementer"]
+default_profile = "implementer"
+
+[[stages]]
+id = "integrate_repair"
+kind = "integrate"
+depends_on = ["repair"]
+inputs = ["integrate.revision", "repair.changes"]
+required_outputs = ["revision"]
+when = "repair_needed"
+optional = true
+completion = "integration_succeeded"
+
+[[stages]]
+id = "rereview"
+kind = "worker"
+depends_on = ["integrate_repair"]
+inputs = ["task", "integrate_repair.revision"]
+required_outputs = ["report"]
+when = "repair_needed"
+optional = true
+completion = "report_passed"
+slot_kind = "fixed"
+min_workers = 1
+max_workers = 1
+allowed_profiles = ["reviewer"]
+default_profile = "reviewer"
+parallel_group = "repair_checks"
+
+[[stages]]
+id = "retest"
+kind = "worker"
+depends_on = ["integrate_repair"]
+inputs = ["task", "integrate_repair.revision"]
+required_outputs = ["report"]
+when = "repair_needed"
+optional = true
+completion = "report_passed"
+slot_kind = "fixed"
+min_workers = 1
+max_workers = 1
+allowed_profiles = ["tester"]
+default_profile = "tester"
+parallel_group = "repair_checks"
+
+[[stages]]
+id = "handoff"
+kind = "worker"
+depends_on = ["repair_gate", "rereview", "retest"]
+inputs = ["task", "selected.revision", "selected.review", "selected.test"]
+required_outputs = ["summary"]
+when = "always"
+optional = false
+completion = "artifact_ready"
+slot_kind = "fixed"
+min_workers = 1
+max_workers = 1
+allowed_profiles = ["handoff"]
+default_profile = "handoff"

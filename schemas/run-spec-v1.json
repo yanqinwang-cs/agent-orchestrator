@@ -1,0 +1,849 @@
+{
+  "$defs": {
+    "AgentRole": {
+      "enum": [
+        "diagnosis",
+        "handoff",
+        "implementation",
+        "planning",
+        "prototype",
+        "prototype-validation",
+        "research",
+        "review",
+        "synthesis",
+        "validation",
+        "verification"
+      ],
+      "title": "AgentRole",
+      "type": "string"
+    },
+    "ApprovalMode": {
+      "enum": [
+        "deny_all"
+      ],
+      "title": "ApprovalMode",
+      "type": "string"
+    },
+    "Condition": {
+      "enum": [
+        "always",
+        "repair_needed",
+        "repair_not_needed"
+      ],
+      "title": "Condition",
+      "type": "string"
+    },
+    "ContextPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "include_full_history": {
+          "default": false,
+          "title": "Include Full History",
+          "type": "boolean"
+        },
+        "max_bytes": {
+          "maximum": 10000000,
+          "minimum": 1,
+          "title": "Max Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "max_bytes"
+      ],
+      "title": "ContextPolicy",
+      "type": "object"
+    },
+    "Effort": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "title": "Effort",
+      "type": "string"
+    },
+    "FailureClass": {
+      "enum": [
+        "provider_transient",
+        "tool_transient",
+        "configuration",
+        "policy",
+        "timeout",
+        "invalid_output",
+        "worker_failure",
+        "cancelled"
+      ],
+      "title": "FailureClass",
+      "type": "string"
+    },
+    "MemoryPolicy": {
+      "enum": [
+        "disabled"
+      ],
+      "title": "MemoryPolicy",
+      "type": "string"
+    },
+    "OverrideEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "value"
+      ],
+      "title": "OverrideEntry",
+      "type": "object"
+    },
+    "PermissionSet": {
+      "additionalProperties": false,
+      "description": "Requested worker permissions; tool lists remain intentions, not enforcement.",
+      "properties": {
+        "approval_mode": {
+          "$ref": "#/$defs/ApprovalMode",
+          "default": "deny_all"
+        },
+        "external_integrations": {
+          "default": false,
+          "title": "External Integrations",
+          "type": "boolean"
+        },
+        "nested_agents": {
+          "default": false,
+          "title": "Nested Agents",
+          "type": "boolean"
+        },
+        "sandbox": {
+          "$ref": "#/$defs/SandboxMode"
+        },
+        "shell_network": {
+          "default": false,
+          "title": "Shell Network",
+          "type": "boolean"
+        },
+        "web_search": {
+          "default": false,
+          "title": "Web Search",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "sandbox"
+      ],
+      "title": "PermissionSet",
+      "type": "object"
+    },
+    "ProjectSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_commands": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Commands",
+          "type": "array"
+        },
+        "apply_to_original": {
+          "title": "Apply To Original",
+          "type": "boolean"
+        },
+        "context_max_bytes": {
+          "title": "Context Max Bytes",
+          "type": "integer"
+        },
+        "context_policy": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Context Policy",
+          "type": "string"
+        },
+        "include_full_history": {
+          "title": "Include Full History",
+          "type": "boolean"
+        },
+        "integrate_into": {
+          "title": "Integrate Into",
+          "type": "string"
+        },
+        "max_parallelism": {
+          "title": "Max Parallelism",
+          "type": "integer"
+        },
+        "project_id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "project_path": {
+          "minLength": 1,
+          "title": "Project Path",
+          "type": "string"
+        },
+        "require_clean_base_for_writes": {
+          "title": "Require Clean Base For Writes",
+          "type": "boolean"
+        },
+        "settings_revision": {
+          "title": "Settings Revision",
+          "type": "string"
+        },
+        "write_strategy": {
+          "title": "Write Strategy",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "settings_revision",
+        "project_path",
+        "max_parallelism",
+        "allowed_commands",
+        "write_strategy",
+        "require_clean_base_for_writes",
+        "integrate_into",
+        "apply_to_original",
+        "context_policy",
+        "context_max_bytes",
+        "include_full_history"
+      ],
+      "title": "ProjectSnapshot",
+      "type": "object"
+    },
+    "ResolvedModelBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "alias": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Alias",
+          "type": "string"
+        },
+        "allowed_efforts": {
+          "items": {
+            "$ref": "#/$defs/Effort"
+          },
+          "title": "Allowed Efforts",
+          "type": "array"
+        },
+        "backend": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Backend",
+          "type": "string"
+        },
+        "model_id": {
+          "minLength": 1,
+          "title": "Model Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "alias",
+        "backend",
+        "model_id",
+        "allowed_efforts"
+      ],
+      "title": "ResolvedModelBinding",
+      "type": "object"
+    },
+    "ResolvedProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Backend",
+          "type": "string"
+        },
+        "base_prompt": {
+          "minLength": 1,
+          "title": "Base Prompt",
+          "type": "string"
+        },
+        "context_policy": {
+          "$ref": "#/$defs/ContextPolicy"
+        },
+        "effort": {
+          "$ref": "#/$defs/Effort"
+        },
+        "id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "memory_policy": {
+          "$ref": "#/$defs/MemoryPolicy"
+        },
+        "model_binding": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Model Binding",
+          "type": "string"
+        },
+        "model_id": {
+          "minLength": 1,
+          "title": "Model Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "objective": {
+          "minLength": 1,
+          "title": "Objective",
+          "type": "string"
+        },
+        "permissions": {
+          "$ref": "#/$defs/PermissionSet"
+        },
+        "required_outputs": {
+          "items": {
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Required Outputs",
+          "type": "array"
+        },
+        "retry_policy": {
+          "$ref": "#/$defs/RetryPolicy"
+        },
+        "role": {
+          "$ref": "#/$defs/AgentRole"
+        },
+        "skills": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Skills",
+          "type": "array"
+        },
+        "timeout_seconds": {
+          "title": "Timeout Seconds",
+          "type": "integer"
+        },
+        "tools": {
+          "items": {
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Tools",
+          "type": "array"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "name",
+        "role",
+        "objective",
+        "base_prompt",
+        "backend",
+        "model_binding",
+        "model_id",
+        "effort",
+        "skills",
+        "tools",
+        "permissions",
+        "context_policy",
+        "memory_policy",
+        "timeout_seconds",
+        "retry_policy",
+        "required_outputs"
+      ],
+      "title": "ResolvedProfile",
+      "type": "object"
+    },
+    "ResolvedRedirectRule": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_profiles": {
+          "items": {
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Allowed Profiles",
+          "type": "array"
+        },
+        "stage": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Stage",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stage",
+        "allowed_profiles"
+      ],
+      "title": "ResolvedRedirectRule",
+      "type": "object"
+    },
+    "ResolvedStage": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_profiles": {
+          "items": {
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Allowed Profiles",
+          "type": "array"
+        },
+        "completion": {
+          "$ref": "#/$defs/StageCompletion"
+        },
+        "default_profile": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Default Profile"
+        },
+        "depends_on": {
+          "items": {
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "inputs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/StageKind"
+        },
+        "max_workers": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Max Workers"
+        },
+        "min_workers": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Min Workers"
+        },
+        "optional": {
+          "title": "Optional",
+          "type": "boolean"
+        },
+        "parallel_group": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parallel Group"
+        },
+        "required_outputs": {
+          "items": {
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Required Outputs",
+          "type": "array"
+        },
+        "slot_briefs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Slot Briefs",
+          "type": "array"
+        },
+        "slot_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SlotKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "when": {
+          "$ref": "#/$defs/Condition"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "depends_on",
+        "inputs",
+        "required_outputs",
+        "when",
+        "optional",
+        "completion",
+        "slot_kind",
+        "min_workers",
+        "max_workers",
+        "allowed_profiles",
+        "default_profile",
+        "parallel_group",
+        "slot_briefs"
+      ],
+      "title": "ResolvedStage",
+      "type": "object"
+    },
+    "ResolvedWorkflow": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_profiles": {
+          "items": {
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Allowed Profiles",
+          "type": "array"
+        },
+        "allowed_redirects": {
+          "items": {
+            "$ref": "#/$defs/ResolvedRedirectRule"
+          },
+          "title": "Allowed Redirects",
+          "type": "array"
+        },
+        "branch_outputs": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "prefixItems": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "type": "array"
+              }
+            ],
+            "type": "array"
+          },
+          "title": "Branch Outputs",
+          "type": "array"
+        },
+        "completion": {
+          "$ref": "#/$defs/WorkflowCompletion"
+        },
+        "id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "max_attempts_per_slot": {
+          "title": "Max Attempts Per Slot",
+          "type": "integer"
+        },
+        "max_duration_seconds": {
+          "title": "Max Duration Seconds",
+          "type": "integer"
+        },
+        "max_parallelism": {
+          "title": "Max Parallelism",
+          "type": "integer"
+        },
+        "max_repair_cycles": {
+          "title": "Max Repair Cycles",
+          "type": "integer"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "required_outputs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Outputs",
+          "type": "array"
+        },
+        "stages": {
+          "items": {
+            "$ref": "#/$defs/ResolvedStage"
+          },
+          "title": "Stages",
+          "type": "array"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "name",
+        "max_parallelism",
+        "max_duration_seconds",
+        "max_attempts_per_slot",
+        "max_repair_cycles",
+        "allowed_profiles",
+        "completion",
+        "required_outputs",
+        "allowed_redirects",
+        "stages",
+        "branch_outputs"
+      ],
+      "title": "ResolvedWorkflow",
+      "type": "object"
+    },
+    "RetryPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "max_attempts": {
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Max Attempts",
+          "type": "integer"
+        },
+        "recoverable_classes": {
+          "items": {
+            "$ref": "#/$defs/FailureClass"
+          },
+          "title": "Recoverable Classes",
+          "type": "array"
+        },
+        "require_known_terminal": {
+          "default": true,
+          "title": "Require Known Terminal",
+          "type": "boolean"
+        },
+        "require_safe_retry": {
+          "default": true,
+          "title": "Require Safe Retry",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "max_attempts",
+        "recoverable_classes"
+      ],
+      "title": "RetryPolicy",
+      "type": "object"
+    },
+    "SandboxMode": {
+      "enum": [
+        "read-only",
+        "workspace-write"
+      ],
+      "title": "SandboxMode",
+      "type": "string"
+    },
+    "SlotKind": {
+      "enum": [
+        "fixed",
+        "select_one",
+        "elastic"
+      ],
+      "title": "SlotKind",
+      "type": "string"
+    },
+    "StageCompletion": {
+      "enum": [
+        "artifact_ready",
+        "report_present",
+        "report_passed",
+        "integration_succeeded",
+        "decision_recorded"
+      ],
+      "title": "StageCompletion",
+      "type": "string"
+    },
+    "StageKind": {
+      "enum": [
+        "worker",
+        "integrate",
+        "integration_check",
+        "repair_gate"
+      ],
+      "title": "StageKind",
+      "type": "string"
+    },
+    "StageSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "profile_ids": {
+          "items": {
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Profile Ids",
+          "type": "array"
+        },
+        "stage_id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Stage Id",
+          "type": "string"
+        },
+        "worker_count": {
+          "title": "Worker Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "stage_id",
+        "worker_count",
+        "profile_ids"
+      ],
+      "title": "StageSelection",
+      "type": "object"
+    },
+    "WorkflowCompletion": {
+      "enum": [
+        "reports_present",
+        "validated_prototype",
+        "verified_revision",
+        "verified_research"
+      ],
+      "title": "WorkflowCompletion",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "applied_overrides": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/OverrideEntry"
+      },
+      "title": "Applied Overrides",
+      "type": "array"
+    },
+    "model_bindings": {
+      "items": {
+        "$ref": "#/$defs/ResolvedModelBinding"
+      },
+      "title": "Model Bindings",
+      "type": "array"
+    },
+    "profiles": {
+      "items": {
+        "$ref": "#/$defs/ResolvedProfile"
+      },
+      "title": "Profiles",
+      "type": "array"
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectSnapshot"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "selections": {
+      "items": {
+        "$ref": "#/$defs/StageSelection"
+      },
+      "title": "Selections",
+      "type": "array"
+    },
+    "snapshot_hash": {
+      "title": "Snapshot Hash",
+      "type": "string"
+    },
+    "task": {
+      "minLength": 1,
+      "title": "Task",
+      "type": "string"
+    },
+    "workflow": {
+      "$ref": "#/$defs/ResolvedWorkflow"
+    }
+  },
+  "required": [
+    "task",
+    "project",
+    "workflow",
+    "profiles",
+    "model_bindings",
+    "selections",
+    "snapshot_hash"
+  ],
+  "title": "RunSpec",
+  "type": "object"
+}

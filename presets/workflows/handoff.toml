@@ -1,0 +1,79 @@
+# Proposed WorkflowPreset schema v1. Conditions and stage kinds are closed enums.
+schema_version = 1
+id = "handoff"
+version = "1.0.0"
+name = "Final handoff"
+max_parallelism = 1
+max_duration_seconds = 5400
+max_attempts_per_slot = 2
+max_repair_cycles = 0
+allowed_profiles = ["tester", "reviewer", "handoff"]
+completion = "verified_revision"
+required_outputs = ["summary.summary"]
+allowed_redirects = []
+
+[policy]
+allowed_backends = ["codex"]
+allowed_model_bindings = ["standard", "deep", "fast"]
+allow_optional_skip = false
+allow_count_selection = false
+allow_profile_selection = false
+allow_retry = true
+allow_permission_expansion = false
+allow_new_profiles = false
+allow_required_stage_removal = false
+
+[[stages]]
+id = "integration_check"
+kind = "integration_check"
+depends_on = []
+inputs = ["task", "project.revision"]
+required_outputs = ["revision"]
+when = "always"
+optional = false
+completion = "integration_succeeded"
+
+[[stages]]
+id = "test"
+kind = "worker"
+depends_on = ["integration_check"]
+inputs = ["task", "integration_check.revision"]
+required_outputs = ["report"]
+when = "always"
+optional = false
+completion = "report_passed"
+slot_kind = "fixed"
+min_workers = 1
+max_workers = 1
+allowed_profiles = ["tester"]
+default_profile = "tester"
+
+[[stages]]
+id = "review"
+kind = "worker"
+depends_on = ["test"]
+inputs = ["task", "integration_check.revision", "test.report"]
+required_outputs = ["report"]
+when = "always"
+optional = false
+completion = "report_passed"
+slot_kind = "fixed"
+min_workers = 1
+max_workers = 1
+allowed_profiles = ["reviewer"]
+default_profile = "reviewer"
+
+[[stages]]
+id = "summary"
+kind = "worker"
+depends_on = ["review"]
+inputs = ["task", "integration_check.revision", "test.report", "review.report"]
+required_outputs = ["summary"]
+when = "always"
+optional = false
+completion = "artifact_ready"
+slot_kind = "fixed"
+min_workers = 1
+max_workers = 1
+allowed_profiles = ["handoff"]
+default_profile = "handoff"

@@ -1,0 +1,6 @@
+schema_version = 1
+
+[[workflows]]
+workflow_id = "feature"
+worker_counts = { implement = 4 }
+

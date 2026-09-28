@@ -1,0 +1,69 @@
+schema_version = 1
+# These are repository launcher presets, not native Codex profile tables.
+# Omit --model to use the user's configured Codex model.
+
+[presets.implement]
+purpose = "Implement one bounded change against explicit acceptance criteria."
+model_recommendation = "Configured strong coding model; explicit --model override if needed."
+effort = "high"
+sandbox = "workspace-write"
+web_search = "disabled"
+skills = ["codebase-design"]
+tools = ["read", "edit", "diff", "test"]
+outputs = ["working diff", "focused validation", "limitations"]
+stop = "Acceptance is met, or a concrete prerequisite prevents completion."
+
+[presets.architecture]
+purpose = "Assess cross-module contracts before implementation."
+model_recommendation = "Configured strong reasoning/coding model."
+effort = "xhigh"
+sandbox = "read-only"
+web_search = "disabled"
+skills = ["codebase-design"]
+tools = ["read", "search", "diff"]
+outputs = ["decision and trade-offs", "affected contracts", "migration and test plan"]
+stop = "A concrete recommendation is supported; leave implementation to its own task."
+
+[presets.debug]
+purpose = "Reproduce and classify a failure, establish its cause, then make a bounded fix."
+model_recommendation = "Configured strong coding model."
+effort = "high"
+sandbox = "workspace-write"
+web_search = "disabled"
+skills = ["diagnosing-bugs"]
+tools = ["read", "edit", "diff", "test"]
+outputs = ["reproduction", "failure class and root cause", "fix and regression evidence"]
+stop = "The fix is verified or the unresolved cause is stated with evidence."
+
+[presets.review]
+purpose = "Independently assess a specified diff against product contracts."
+model_recommendation = "Configured strong reasoning/coding model."
+effort = "high"
+sandbox = "read-only"
+web_search = "disabled"
+skills = ["code-review"]
+tools = ["read", "search", "diff"]
+outputs = ["actionable findings with file and line evidence", "verification limits"]
+stop = "The scoped diff and affected contracts are assessed; do not implement fixes."
+
+[presets.test]
+purpose = "Execute the requested deterministic validation and classify failures."
+model_recommendation = "Configured coding model; moderate effort is sufficient."
+effort = "medium"
+sandbox = "workspace-write"
+web_search = "disabled"
+skills = []
+tools = ["read", "test", "temporary output"]
+outputs = ["commands and results", "classified failures", "coverage limits"]
+stop = "Requested validation is complete; leave source changes to an implementation task."
+
+[presets.research]
+purpose = "Answer one narrow technical question using primary sources."
+model_recommendation = "Configured strong reasoning model with supported web search."
+effort = "high"
+sandbox = "read-only"
+web_search = "live"
+skills = ["research", "openai-docs"]
+tools = ["read", "search", "web"]
+outputs = ["supported answer", "primary-source links", "uncertainty and decision impact"]
+stop = "The decision question is answered; do not expand into a market survey."

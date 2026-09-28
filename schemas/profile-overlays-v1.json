@@ -1,0 +1,214 @@
+{
+  "$defs": {
+    "ApprovalMode": {
+      "enum": [
+        "deny_all"
+      ],
+      "title": "ApprovalMode",
+      "type": "string"
+    },
+    "ContextPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "include_full_history": {
+          "default": false,
+          "title": "Include Full History",
+          "type": "boolean"
+        },
+        "max_bytes": {
+          "maximum": 10000000,
+          "minimum": 1,
+          "title": "Max Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "max_bytes"
+      ],
+      "title": "ContextPolicy",
+      "type": "object"
+    },
+    "Effort": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "title": "Effort",
+      "type": "string"
+    },
+    "PermissionSet": {
+      "additionalProperties": false,
+      "description": "Requested worker permissions; tool lists remain intentions, not enforcement.",
+      "properties": {
+        "approval_mode": {
+          "$ref": "#/$defs/ApprovalMode",
+          "default": "deny_all"
+        },
+        "external_integrations": {
+          "default": false,
+          "title": "External Integrations",
+          "type": "boolean"
+        },
+        "nested_agents": {
+          "default": false,
+          "title": "Nested Agents",
+          "type": "boolean"
+        },
+        "sandbox": {
+          "$ref": "#/$defs/SandboxMode"
+        },
+        "shell_network": {
+          "default": false,
+          "title": "Shell Network",
+          "type": "boolean"
+        },
+        "web_search": {
+          "default": false,
+          "title": "Web Search",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "sandbox"
+      ],
+      "title": "PermissionSet",
+      "type": "object"
+    },
+    "ProfileOverlay": {
+      "additionalProperties": false,
+      "properties": {
+        "base_prompt": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base Prompt"
+        },
+        "context_policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContextPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "effort": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Effort"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "model_binding": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Binding"
+        },
+        "permissions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PermissionSet"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "profile_id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Profile Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "timeout_seconds": {
+          "anyOf": [
+            {
+              "maximum": 86400,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout Seconds"
+        }
+      },
+      "required": [
+        "profile_id"
+      ],
+      "title": "ProfileOverlay",
+      "type": "object"
+    },
+    "SandboxMode": {
+      "enum": [
+        "read-only",
+        "workspace-write"
+      ],
+      "title": "SandboxMode",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "profiles": {
+      "items": {
+        "$ref": "#/$defs/ProfileOverlay"
+      },
+      "title": "Profiles",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "profiles"
+  ],
+  "title": "ProfileOverlayFile",
+  "type": "object"
+}

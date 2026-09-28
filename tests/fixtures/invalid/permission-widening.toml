@@ -1,0 +1,6 @@
+schema_version = 1
+
+[[profiles]]
+profile_id = "reviewer"
+permissions = { sandbox = "workspace-write", shell_network = true, web_search = false, approval_mode = "deny_all", external_integrations = false, nested_agents = false }
+

@@ -1,0 +1,20 @@
+schema_version = 1
+
+[backends.codex]
+kind = "codex_sdk"
+sdk_package = "openai-codex"
+sdk_version = "0.147.0"
+cli_source = "sdk_pinned_dependency"
+client_per_attempt = true
+auth_owner = "codex"
+codex_home_env = "ORCHESTRATOR_CODEX_HOME"
+approval_mode = "deny_all"
+experimental_api = false
+interrupt_grace_seconds = 10
+shutdown_grace_seconds = 5
+allow_unverified_policy = false
+
+[backends.fake]
+kind = "scripted_fake"
+test_only = true
+clock = "manual"

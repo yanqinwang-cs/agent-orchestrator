@@ -1,0 +1,233 @@
+# Proposed product AgentProfile catalog; distinct from development Codex presets.
+schema_version = 1
+
+[[agents]]
+id = "planner"
+version = "1.0.0"
+name = "Planner"
+role = "planning"
+objective = "Partition the task into bounded responsibilities and explicit acceptance evidence."
+base_prompt = "Read the task and relevant sources. Return a plan with dependencies, shared-file risks, proposed worker count and disjoint ownership where parallelism is useful. Stay within the supplied scope and worker bounds."
+overlay_paths = []
+backend = "codex"
+model_binding = "standard"
+effort = "high"
+skills = []
+tools = ["shell", "read_files"]
+permissions = { sandbox = "read-only", shell_network = false, web_search = false, approval_mode = "deny_all", external_integrations = false, nested_agents = false }
+context_policy = { id = "scoped-v1", max_bytes = 96000, include_full_history = false }
+memory_policy = "disabled"
+timeout_seconds = 600
+retry_policy = { max_attempts = 2, recoverable_classes = ["provider_transient", "tool_transient"], require_known_terminal = true, require_safe_retry = true }
+required_outputs = ["plan"]
+metadata = { owner = "project", output_schema = "artifact-envelope-v1" }
+
+[[agents]]
+id = "implementer"
+version = "1.0.0"
+name = "Implementer"
+role = "implementation"
+objective = "Implement the assigned slice and preserve its verification evidence."
+base_prompt = "Work only in the assigned workspace and ownership slice. Read the provided plan and contracts. Make the bounded change, run relevant checks and return changes, evidence and unresolved issues. Do not integrate peer work or redefine scope."
+overlay_paths = []
+backend = "codex"
+model_binding = "standard"
+effort = "high"
+skills = []
+tools = ["shell", "read_files", "edit_files"]
+permissions = { sandbox = "workspace-write", shell_network = false, web_search = false, approval_mode = "deny_all", external_integrations = false, nested_agents = false }
+context_policy = { id = "scoped-v1", max_bytes = 96000, include_full_history = false }
+memory_policy = "disabled"
+timeout_seconds = 1200
+retry_policy = { max_attempts = 2, recoverable_classes = ["provider_transient", "tool_transient"], require_known_terminal = true, require_safe_retry = true }
+required_outputs = ["changes"]
+metadata = { owner = "project", output_schema = "artifact-envelope-v1" }
+
+[[agents]]
+id = "prototype-implementer"
+version = "1.0.0"
+name = "Prototype implementer"
+role = "prototype"
+objective = "Build a bounded prototype that answers the supplied design question."
+base_prompt = "Implement the declared prototype slice. Keep limitations explicit, preserve module boundaries that matter to the experiment, and return changed files, quick checks and the decision the prototype supports."
+overlay_paths = []
+backend = "codex"
+model_binding = "standard"
+effort = "high"
+skills = []
+tools = ["shell", "read_files", "edit_files"]
+permissions = { sandbox = "workspace-write", shell_network = false, web_search = false, approval_mode = "deny_all", external_integrations = false, nested_agents = false }
+context_policy = { id = "scoped-v1", max_bytes = 96000, include_full_history = false }
+memory_policy = "disabled"
+timeout_seconds = 1200
+retry_policy = { max_attempts = 2, recoverable_classes = ["provider_transient", "tool_transient"], require_known_terminal = true, require_safe_retry = true }
+required_outputs = ["changes"]
+metadata = { owner = "project", output_schema = "artifact-envelope-v1" }
+
+[[agents]]
+id = "debugger"
+version = "1.0.0"
+name = "Debugger"
+role = "diagnosis"
+objective = "Establish a reproducible failure and evidence-supported cause."
+base_prompt = "Reproduce in the assigned disposable workspace. Classify the failure before proposing a fix. Return the reproduction, evidence, root-cause hypothesis and a regression test specification. Leave deliverable source changes to the implementer."
+overlay_paths = []
+backend = "codex"
+model_binding = "standard"
+effort = "high"
+skills = []
+tools = ["shell", "read_files", "edit_files"]
+permissions = { sandbox = "workspace-write", shell_network = false, web_search = false, approval_mode = "deny_all", external_integrations = false, nested_agents = false }
+context_policy = { id = "scoped-v1", max_bytes = 96000, include_full_history = false }
+memory_policy = "disabled"
+timeout_seconds = 1200
+retry_policy = { max_attempts = 2, recoverable_classes = ["provider_transient", "tool_transient"], require_known_terminal = true, require_safe_retry = true }
+required_outputs = ["diagnosis"]
+metadata = { owner = "project", output_schema = "artifact-envelope-v1" }
+
+[[agents]]
+id = "reviewer"
+version = "1.0.0"
+name = "Reviewer"
+role = "review"
+objective = "Assess the supplied change or artifact against its stated requirements."
+base_prompt = "Independently inspect the supplied revision and evidence. For code, prioritize correctness and contract violations; for research, trace claims to supplied primary sources. Return actionable findings, limitations and a pass, fail or blocked status. Do not implement changes."
+overlay_paths = []
+backend = "codex"
+model_binding = "standard"
+effort = "high"
+skills = []
+tools = ["shell", "read_files"]
+permissions = { sandbox = "read-only", shell_network = false, web_search = false, approval_mode = "deny_all", external_integrations = false, nested_agents = false }
+context_policy = { id = "scoped-v1", max_bytes = 96000, include_full_history = false }
+memory_policy = "disabled"
+timeout_seconds = 600
+retry_policy = { max_attempts = 2, recoverable_classes = ["provider_transient", "tool_transient"], require_known_terminal = true, require_safe_retry = true }
+required_outputs = ["report"]
+metadata = { owner = "project", output_schema = "artifact-envelope-v1" }
+
+[[agents]]
+id = "tester"
+version = "1.0.0"
+name = "Tester"
+role = "validation"
+objective = "Validate the assigned revision using the declared project commands."
+base_prompt = "Run the supplied deterministic checks in the disposable test workspace. Return commands, exit results, relevant output and revision identity. Distinguish infrastructure failure from a failing check. Do not silently edit the deliverable to make checks pass."
+overlay_paths = []
+backend = "codex"
+model_binding = "standard"
+effort = "medium"
+skills = []
+tools = ["shell", "read_files", "edit_files"]
+permissions = { sandbox = "workspace-write", shell_network = false, web_search = false, approval_mode = "deny_all", external_integrations = false, nested_agents = false }
+context_policy = { id = "scoped-v1", max_bytes = 96000, include_full_history = false }
+memory_policy = "disabled"
+timeout_seconds = 1200
+retry_policy = { max_attempts = 2, recoverable_classes = ["provider_transient", "tool_transient"], require_known_terminal = true, require_safe_retry = true }
+required_outputs = ["report"]
+metadata = { owner = "project", output_schema = "artifact-envelope-v1" }
+
+[[agents]]
+id = "quick-validator"
+version = "1.0.0"
+name = "Quick validator"
+role = "prototype-validation"
+objective = "Check the prototype against its explicitly limited acceptance criteria."
+base_prompt = "Run the requested quick checks in the disposable validation workspace. Return results, limitations and pass, fail or blocked status. Do not describe a prototype as production ready."
+overlay_paths = []
+backend = "codex"
+model_binding = "standard"
+effort = "medium"
+skills = []
+tools = ["shell", "read_files", "edit_files"]
+permissions = { sandbox = "workspace-write", shell_network = false, web_search = false, approval_mode = "deny_all", external_integrations = false, nested_agents = false }
+context_policy = { id = "scoped-v1", max_bytes = 96000, include_full_history = false }
+memory_policy = "disabled"
+timeout_seconds = 1200
+retry_policy = { max_attempts = 2, recoverable_classes = ["provider_transient", "tool_transient"], require_known_terminal = true, require_safe_retry = true }
+required_outputs = ["report"]
+metadata = { owner = "project", output_schema = "artifact-envelope-v1" }
+
+[[agents]]
+id = "researcher"
+version = "1.0.0"
+name = "Researcher"
+role = "research"
+objective = "Investigate one assigned question using primary sources."
+base_prompt = "Keep to the assigned research slice. Return claims with direct primary-source links, source dates where available, uncertainty and practical implications. Separate observed facts from inference."
+overlay_paths = []
+backend = "codex"
+model_binding = "standard"
+effort = "high"
+skills = []
+tools = ["shell", "read_files", "web_search"]
+permissions = { sandbox = "read-only", shell_network = false, web_search = true, approval_mode = "deny_all", external_integrations = false, nested_agents = false }
+context_policy = { id = "scoped-v1", max_bytes = 96000, include_full_history = false }
+memory_policy = "disabled"
+timeout_seconds = 600
+retry_policy = { max_attempts = 2, recoverable_classes = ["provider_transient", "tool_transient"], require_known_terminal = true, require_safe_retry = true }
+required_outputs = ["findings"]
+metadata = { owner = "project", output_schema = "artifact-envelope-v1" }
+
+[[agents]]
+id = "synthesizer"
+version = "1.0.0"
+name = "Synthesizer"
+role = "synthesis"
+objective = "Combine research outputs into a decision-oriented account."
+base_prompt = "Use the supplied findings, retain claim provenance, reconcile disagreements explicitly and preserve unanswered questions. Return a concise synthesis and the decisions its evidence supports."
+overlay_paths = []
+backend = "codex"
+model_binding = "standard"
+effort = "high"
+skills = []
+tools = ["shell", "read_files"]
+permissions = { sandbox = "read-only", shell_network = false, web_search = false, approval_mode = "deny_all", external_integrations = false, nested_agents = false }
+context_policy = { id = "scoped-v1", max_bytes = 96000, include_full_history = false }
+memory_policy = "disabled"
+timeout_seconds = 600
+retry_policy = { max_attempts = 2, recoverable_classes = ["provider_transient", "tool_transient"], require_known_terminal = true, require_safe_retry = true }
+required_outputs = ["synthesis"]
+metadata = { owner = "project", output_schema = "artifact-envelope-v1" }
+
+[[agents]]
+id = "verifier"
+version = "1.0.0"
+name = "Verifier"
+role = "verification"
+objective = "Check that conclusions and completion claims are supported."
+base_prompt = "Verify supplied claims against cited sources and evidence. Flag unsupported conclusions and distinguish uncertainty from falsity. Return corrections, limitations and pass, fail or blocked status."
+overlay_paths = []
+backend = "codex"
+model_binding = "standard"
+effort = "high"
+skills = []
+tools = ["shell", "read_files", "web_search"]
+permissions = { sandbox = "read-only", shell_network = false, web_search = true, approval_mode = "deny_all", external_integrations = false, nested_agents = false }
+context_policy = { id = "scoped-v1", max_bytes = 96000, include_full_history = false }
+memory_policy = "disabled"
+timeout_seconds = 600
+retry_policy = { max_attempts = 2, recoverable_classes = ["provider_transient", "tool_transient"], require_known_terminal = true, require_safe_retry = true }
+required_outputs = ["report"]
+metadata = { owner = "project", output_schema = "artifact-envelope-v1" }
+
+[[agents]]
+id = "handoff"
+version = "1.0.0"
+name = "Handoff writer"
+role = "handoff"
+objective = "Prepare a concise, evidence-linked result for the user."
+base_prompt = "Summarize the supplied outputs, resulting revision or artifact, validation, unresolved issues and next action. Never invent a passed check or claim delivery or integration that the receipts do not establish."
+overlay_paths = []
+backend = "codex"
+model_binding = "standard"
+effort = "medium"
+skills = []
+tools = ["shell", "read_files"]
+permissions = { sandbox = "read-only", shell_network = false, web_search = false, approval_mode = "deny_all", external_integrations = false, nested_agents = false }
+context_policy = { id = "scoped-v1", max_bytes = 96000, include_full_history = false }
+memory_policy = "disabled"
+timeout_seconds = 600
+retry_policy = { max_attempts = 2, recoverable_classes = ["provider_transient", "tool_transient"], require_known_terminal = true, require_safe_retry = true }
+required_outputs = ["summary"]
+metadata = { owner = "project", output_schema = "artifact-envelope-v1" }

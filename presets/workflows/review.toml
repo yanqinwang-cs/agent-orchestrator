@@ -1,0 +1,39 @@
+# Proposed WorkflowPreset schema v1. Conditions and stage kinds are closed enums.
+schema_version = 1
+id = "review"
+version = "1.0.0"
+name = "Review only"
+max_parallelism = 1
+max_duration_seconds = 1800
+max_attempts_per_slot = 2
+max_repair_cycles = 0
+allowed_profiles = ["reviewer"]
+completion = "reports_present"
+required_outputs = ["review.report"]
+allowed_redirects = []
+
+[policy]
+allowed_backends = ["codex"]
+allowed_model_bindings = ["standard", "deep", "fast"]
+allow_optional_skip = false
+allow_count_selection = false
+allow_profile_selection = false
+allow_retry = true
+allow_permission_expansion = false
+allow_new_profiles = false
+allow_required_stage_removal = false
+
+[[stages]]
+id = "review"
+kind = "worker"
+depends_on = []
+inputs = ["task"]
+required_outputs = ["report"]
+when = "always"
+optional = false
+completion = "report_present"
+slot_kind = "fixed"
+min_workers = 1
+max_workers = 1
+allowed_profiles = ["reviewer"]
+default_profile = "reviewer"

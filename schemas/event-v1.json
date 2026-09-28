@@ -1,0 +1,1122 @@
+{
+  "$defs": {
+    "Artifact": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_id": {
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "content_hash": {
+          "minLength": 1,
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "input_revision": {
+          "minLength": 1,
+          "title": "Input Revision",
+          "type": "string"
+        },
+        "relative_path": {
+          "minLength": 1,
+          "title": "Relative Path",
+          "type": "string"
+        },
+        "schema_id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Schema Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "workspace_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workspace Revision"
+        }
+      },
+      "required": [
+        "id",
+        "attempt_id",
+        "input_revision",
+        "schema_id",
+        "relative_path",
+        "content_hash"
+      ],
+      "title": "Artifact",
+      "type": "object"
+    },
+    "ArtifactRecordedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "minLength": 1,
+          "title": "Actor",
+          "type": "string"
+        },
+        "artifact": {
+          "$ref": "#/$defs/Artifact"
+        },
+        "cause_event_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cause Event Id"
+        },
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "artifact_recorded",
+          "title": "Kind",
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "sequence": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sequence"
+        }
+      },
+      "required": [
+        "event_id",
+        "run_id",
+        "occurred_at",
+        "actor",
+        "kind",
+        "artifact"
+      ],
+      "title": "ArtifactRecordedEvent",
+      "type": "object"
+    },
+    "AttemptStatus": {
+      "enum": [
+        "pending",
+        "launching",
+        "running",
+        "cancel_requested",
+        "succeeded",
+        "failed",
+        "timed_out",
+        "cancelled",
+        "outcome_unknown"
+      ],
+      "title": "AttemptStatus",
+      "type": "string"
+    },
+    "AttemptStatusChangedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "minLength": 1,
+          "title": "Actor",
+          "type": "string"
+        },
+        "attempt_id": {
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "cause_event_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cause Event Id"
+        },
+        "current": {
+          "$ref": "#/$defs/AttemptStatus"
+        },
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "attempt_status_changed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "previous": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttemptStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "sequence": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sequence"
+        }
+      },
+      "required": [
+        "event_id",
+        "run_id",
+        "occurred_at",
+        "actor",
+        "kind",
+        "attempt_id",
+        "current"
+      ],
+      "title": "AttemptStatusChangedEvent",
+      "type": "object"
+    },
+    "Handoff": {
+      "additionalProperties": false,
+      "properties": {
+        "content_hash": {
+          "minLength": 1,
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "destination_slot": {
+          "minLength": 1,
+          "title": "Destination Slot",
+          "type": "string"
+        },
+        "destination_stage": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Destination Stage",
+          "type": "string"
+        },
+        "input_revision": {
+          "minLength": 1,
+          "title": "Input Revision",
+          "type": "string"
+        },
+        "project_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Project Revision"
+        },
+        "relative_path": {
+          "minLength": 1,
+          "title": "Relative Path",
+          "type": "string"
+        },
+        "schema_id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Schema Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "source_attempt_id": {
+          "minLength": 1,
+          "title": "Source Attempt Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_attempt_id",
+        "destination_stage",
+        "destination_slot",
+        "input_revision",
+        "content_hash",
+        "schema_id",
+        "relative_path"
+      ],
+      "title": "Handoff",
+      "type": "object"
+    },
+    "HandoffRecordedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "minLength": 1,
+          "title": "Actor",
+          "type": "string"
+        },
+        "cause_event_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cause Event Id"
+        },
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "handoff": {
+          "$ref": "#/$defs/Handoff"
+        },
+        "kind": {
+          "const": "handoff_recorded",
+          "title": "Kind",
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "sequence": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sequence"
+        }
+      },
+      "required": [
+        "event_id",
+        "run_id",
+        "occurred_at",
+        "actor",
+        "kind",
+        "handoff"
+      ],
+      "title": "HandoffRecordedEvent",
+      "type": "object"
+    },
+    "Intervention": {
+      "discriminator": {
+        "mapping": {
+          "pause": "#/$defs/PauseIntervention",
+          "redirect": "#/$defs/RedirectIntervention",
+          "resume": "#/$defs/ResumeIntervention",
+          "retry": "#/$defs/RetryIntervention",
+          "steer": "#/$defs/SteerIntervention",
+          "stop": "#/$defs/StopIntervention",
+          "stop_attempt": "#/$defs/StopAttemptIntervention"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/PauseIntervention"
+        },
+        {
+          "$ref": "#/$defs/ResumeIntervention"
+        },
+        {
+          "$ref": "#/$defs/StopIntervention"
+        },
+        {
+          "$ref": "#/$defs/StopAttemptIntervention"
+        },
+        {
+          "$ref": "#/$defs/SteerIntervention"
+        },
+        {
+          "$ref": "#/$defs/RetryIntervention"
+        },
+        {
+          "$ref": "#/$defs/RedirectIntervention"
+        }
+      ]
+    },
+    "InterventionDeliveredEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "minLength": 1,
+          "title": "Actor",
+          "type": "string"
+        },
+        "cause_event_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cause Event Id"
+        },
+        "command_id": {
+          "format": "uuid",
+          "title": "Command Id",
+          "type": "string"
+        },
+        "delivery_status": {
+          "enum": [
+            "acknowledged",
+            "rejected",
+            "unknown"
+          ],
+          "title": "Delivery Status",
+          "type": "string"
+        },
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "intervention_delivered",
+          "title": "Kind",
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Result"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "sequence": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sequence"
+        }
+      },
+      "required": [
+        "event_id",
+        "run_id",
+        "occurred_at",
+        "actor",
+        "kind",
+        "command_id",
+        "delivery_status"
+      ],
+      "title": "InterventionDeliveredEvent",
+      "type": "object"
+    },
+    "InterventionRequestedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "minLength": 1,
+          "title": "Actor",
+          "type": "string"
+        },
+        "cause_event_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cause Event Id"
+        },
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "intervention": {
+          "$ref": "#/$defs/Intervention"
+        },
+        "kind": {
+          "const": "intervention_requested",
+          "title": "Kind",
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "sequence": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sequence"
+        }
+      },
+      "required": [
+        "event_id",
+        "run_id",
+        "occurred_at",
+        "actor",
+        "kind",
+        "intervention"
+      ],
+      "title": "InterventionRequestedEvent",
+      "type": "object"
+    },
+    "PauseIntervention": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "minLength": 1,
+          "title": "Actor",
+          "type": "string"
+        },
+        "command_id": {
+          "format": "uuid",
+          "title": "Command Id",
+          "type": "string"
+        },
+        "expected_run_revision": {
+          "minimum": 0,
+          "title": "Expected Run Revision",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "pause",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "target": {
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command_id",
+        "actor",
+        "target",
+        "expected_run_revision",
+        "kind"
+      ],
+      "title": "PauseIntervention",
+      "type": "object"
+    },
+    "RedirectIntervention": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "minLength": 1,
+          "title": "Actor",
+          "type": "string"
+        },
+        "command_id": {
+          "format": "uuid",
+          "title": "Command Id",
+          "type": "string"
+        },
+        "expected_run_revision": {
+          "minimum": 0,
+          "title": "Expected Run Revision",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "redirect",
+          "title": "Kind",
+          "type": "string"
+        },
+        "recipient_profile_id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Recipient Profile Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "stage_id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Stage Id",
+          "type": "string"
+        },
+        "target": {
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command_id",
+        "actor",
+        "target",
+        "expected_run_revision",
+        "kind",
+        "stage_id",
+        "recipient_profile_id"
+      ],
+      "title": "RedirectIntervention",
+      "type": "object"
+    },
+    "ResumeIntervention": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "minLength": 1,
+          "title": "Actor",
+          "type": "string"
+        },
+        "command_id": {
+          "format": "uuid",
+          "title": "Command Id",
+          "type": "string"
+        },
+        "expected_run_revision": {
+          "minimum": 0,
+          "title": "Expected Run Revision",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "resume",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "target": {
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command_id",
+        "actor",
+        "target",
+        "expected_run_revision",
+        "kind"
+      ],
+      "title": "ResumeIntervention",
+      "type": "object"
+    },
+    "RetryIntervention": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "minLength": 1,
+          "title": "Actor",
+          "type": "string"
+        },
+        "attempt_id": {
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "command_id": {
+          "format": "uuid",
+          "title": "Command Id",
+          "type": "string"
+        },
+        "expected_run_revision": {
+          "minimum": 0,
+          "title": "Expected Run Revision",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "retry",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "target": {
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command_id",
+        "actor",
+        "target",
+        "expected_run_revision",
+        "kind",
+        "attempt_id"
+      ],
+      "title": "RetryIntervention",
+      "type": "object"
+    },
+    "RunStatus": {
+      "enum": [
+        "ready",
+        "running",
+        "pause_requested",
+        "paused",
+        "stopping",
+        "stopped",
+        "succeeded",
+        "failed",
+        "attention_required"
+      ],
+      "title": "RunStatus",
+      "type": "string"
+    },
+    "RunStatusChangedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "minLength": 1,
+          "title": "Actor",
+          "type": "string"
+        },
+        "cause_event_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cause Event Id"
+        },
+        "current": {
+          "$ref": "#/$defs/RunStatus"
+        },
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "run_status_changed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "previous": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "sequence": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sequence"
+        }
+      },
+      "required": [
+        "event_id",
+        "run_id",
+        "occurred_at",
+        "actor",
+        "kind",
+        "current"
+      ],
+      "title": "RunStatusChangedEvent",
+      "type": "object"
+    },
+    "SteerIntervention": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "minLength": 1,
+          "title": "Actor",
+          "type": "string"
+        },
+        "attempt_id": {
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "command_id": {
+          "format": "uuid",
+          "title": "Command Id",
+          "type": "string"
+        },
+        "expected_run_revision": {
+          "minimum": 0,
+          "title": "Expected Run Revision",
+          "type": "integer"
+        },
+        "expected_turn_id": {
+          "minLength": 1,
+          "title": "Expected Turn Id",
+          "type": "string"
+        },
+        "instruction": {
+          "minLength": 1,
+          "title": "Instruction",
+          "type": "string"
+        },
+        "kind": {
+          "const": "steer",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "target": {
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command_id",
+        "actor",
+        "target",
+        "expected_run_revision",
+        "kind",
+        "attempt_id",
+        "expected_turn_id",
+        "instruction"
+      ],
+      "title": "SteerIntervention",
+      "type": "object"
+    },
+    "StopAttemptIntervention": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "minLength": 1,
+          "title": "Actor",
+          "type": "string"
+        },
+        "attempt_id": {
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "command_id": {
+          "format": "uuid",
+          "title": "Command Id",
+          "type": "string"
+        },
+        "expected_run_revision": {
+          "minimum": 0,
+          "title": "Expected Run Revision",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "stop_attempt",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "target": {
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command_id",
+        "actor",
+        "target",
+        "expected_run_revision",
+        "kind",
+        "attempt_id"
+      ],
+      "title": "StopAttemptIntervention",
+      "type": "object"
+    },
+    "StopIntervention": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "minLength": 1,
+          "title": "Actor",
+          "type": "string"
+        },
+        "command_id": {
+          "format": "uuid",
+          "title": "Command Id",
+          "type": "string"
+        },
+        "expected_run_revision": {
+          "minimum": 0,
+          "title": "Expected Run Revision",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "stop",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "target": {
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command_id",
+        "actor",
+        "target",
+        "expected_run_revision",
+        "kind"
+      ],
+      "title": "StopIntervention",
+      "type": "object"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "artifact_recorded": "#/$defs/ArtifactRecordedEvent",
+      "attempt_status_changed": "#/$defs/AttemptStatusChangedEvent",
+      "handoff_recorded": "#/$defs/HandoffRecordedEvent",
+      "intervention_delivered": "#/$defs/InterventionDeliveredEvent",
+      "intervention_requested": "#/$defs/InterventionRequestedEvent",
+      "run_status_changed": "#/$defs/RunStatusChangedEvent"
+    },
+    "propertyName": "kind"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/RunStatusChangedEvent"
+    },
+    {
+      "$ref": "#/$defs/AttemptStatusChangedEvent"
+    },
+    {
+      "$ref": "#/$defs/InterventionRequestedEvent"
+    },
+    {
+      "$ref": "#/$defs/InterventionDeliveredEvent"
+    },
+    {
+      "$ref": "#/$defs/ArtifactRecordedEvent"
+    },
+    {
+      "$ref": "#/$defs/HandoffRecordedEvent"
+    }
+  ]
+}

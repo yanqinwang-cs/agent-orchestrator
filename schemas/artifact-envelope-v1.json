@@ -1,0 +1,111 @@
+{
+  "$defs": {
+    "ArtifactEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "content_hash": {
+          "minLength": 1,
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "relative_path": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Relative Path"
+        },
+        "schema_id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Schema Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "schema_id",
+        "content_hash"
+      ],
+      "title": "ArtifactEntry",
+      "type": "object"
+    },
+    "OutputStatus": {
+      "enum": [
+        "pass",
+        "fail",
+        "blocked"
+      ],
+      "title": "OutputStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Versioned worker output contract, independent of stage success semantics.",
+  "properties": {
+    "artifacts": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ArtifactEntry"
+      },
+      "title": "Artifacts",
+      "type": "array"
+    },
+    "attempt_id": {
+      "minLength": 1,
+      "title": "Attempt Id",
+      "type": "string"
+    },
+    "input_revision": {
+      "minLength": 1,
+      "title": "Input Revision",
+      "type": "string"
+    },
+    "schema_id": {
+      "const": "artifact-envelope-v1",
+      "default": "artifact-envelope-v1",
+      "title": "Schema Id",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/OutputStatus"
+    },
+    "summary": {
+      "minLength": 1,
+      "title": "Summary",
+      "type": "string"
+    },
+    "workspace_revision": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Workspace Revision"
+    }
+  },
+  "required": [
+    "attempt_id",
+    "input_revision",
+    "status",
+    "summary"
+  ],
+  "title": "ArtifactEnvelope",
+  "type": "object"
+}

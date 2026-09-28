@@ -1,0 +1,119 @@
+{
+  "$defs": {
+    "DevelopmentPreset": {
+      "additionalProperties": false,
+      "properties": {
+        "effort": {
+          "$ref": "#/$defs/Effort"
+        },
+        "model_recommendation": {
+          "minLength": 1,
+          "title": "Model Recommendation",
+          "type": "string"
+        },
+        "outputs": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "purpose": {
+          "minLength": 1,
+          "title": "Purpose",
+          "type": "string"
+        },
+        "sandbox": {
+          "$ref": "#/$defs/SandboxMode"
+        },
+        "skills": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Skills",
+          "type": "array"
+        },
+        "stop": {
+          "minLength": 1,
+          "title": "Stop",
+          "type": "string"
+        },
+        "tools": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tools",
+          "type": "array"
+        },
+        "web_search": {
+          "enum": [
+            "disabled",
+            "live"
+          ],
+          "title": "Web Search",
+          "type": "string"
+        }
+      },
+      "required": [
+        "purpose",
+        "model_recommendation",
+        "effort",
+        "sandbox",
+        "web_search",
+        "skills",
+        "tools",
+        "outputs",
+        "stop"
+      ],
+      "title": "DevelopmentPreset",
+      "type": "object"
+    },
+    "Effort": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "title": "Effort",
+      "type": "string"
+    },
+    "SandboxMode": {
+      "enum": [
+        "read-only",
+        "workspace-write"
+      ],
+      "title": "SandboxMode",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "presets": {
+      "patternProperties": {
+        "^[a-z][a-z0-9_-]*$": {
+          "$ref": "#/$defs/DevelopmentPreset"
+        }
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Presets",
+      "type": "object"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "presets"
+  ],
+  "title": "DevelopmentConfig",
+  "type": "object"
+}

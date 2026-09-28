@@ -1,0 +1,85 @@
+{
+  "$defs": {
+    "Effort": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "title": "Effort",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "enforceable_permission_settings": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Enforceable Permission Settings",
+      "type": "array"
+    },
+    "interruption": {
+      "title": "Interruption",
+      "type": "boolean"
+    },
+    "output_schemas": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Output Schemas",
+      "type": "array"
+    },
+    "saved_history_inspection": {
+      "title": "Saved History Inspection",
+      "type": "boolean"
+    },
+    "steering": {
+      "title": "Steering",
+      "type": "boolean"
+    },
+    "streaming": {
+      "title": "Streaming",
+      "type": "boolean"
+    },
+    "supported_efforts": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Effort"
+      },
+      "title": "Supported Efforts",
+      "type": "array"
+    },
+    "unavailable_controls": {
+      "default": [],
+      "items": {
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "string"
+          }
+        ],
+        "type": "array"
+      },
+      "title": "Unavailable Controls",
+      "type": "array"
+    }
+  },
+  "required": [
+    "streaming",
+    "steering",
+    "interruption",
+    "saved_history_inspection"
+  ],
+  "title": "BackendCapabilities",
+  "type": "object"
+}

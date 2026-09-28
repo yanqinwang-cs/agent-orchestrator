@@ -1,0 +1,35 @@
+schema_version = 1
+id = "example-project"
+name = "Example project"
+# Replace through the UI or a copied project configuration before a live run.
+path = "/absolute/path/to/project"
+max_parallelism = 4
+agent_overlay_paths = []
+workflow_overlay_paths = []
+allowed_workflows = ["review", "prototype", "feature", "debug", "research", "handoff"]
+allowed_commands = ["uv run pytest -m 'not live'", "uv run ruff check ."]
+# Commands describe trusted project validation actions, not a Codex shell whitelist.
+
+[workspace]
+write_strategy = "git_worktree"
+require_clean_base_for_writes = true
+integrate_into = "run_worktree"
+apply_to_original = false
+
+[models]
+# Empty catalog is valid project setup but blocks real runs until selected.
+# The UI populates bindings from backend model discovery, e.g.:
+# [models.standard]
+# backend = "codex"
+# model_id = "<a concrete ID returned by this account's model list>"
+# allowed_efforts = ["medium", "high"]
+# Optional deep/fast bindings use the same shape and may select different models.
+# Only bindings actually used by the resolved run must be configured.
+
+[context]
+policy = "scoped-v1"
+max_bytes = 96000
+include_full_history = false
+
+[memory]
+policy = "disabled"

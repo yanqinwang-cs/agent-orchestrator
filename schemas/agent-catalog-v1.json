@@ -1,0 +1,321 @@
+{
+  "$defs": {
+    "AgentProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Backend",
+          "type": "string"
+        },
+        "base_prompt": {
+          "minLength": 1,
+          "title": "Base Prompt",
+          "type": "string"
+        },
+        "context_policy": {
+          "$ref": "#/$defs/ContextPolicy"
+        },
+        "effort": {
+          "$ref": "#/$defs/Effort"
+        },
+        "id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "memory_policy": {
+          "$ref": "#/$defs/MemoryPolicy",
+          "default": "disabled"
+        },
+        "metadata": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Metadata",
+          "type": "object"
+        },
+        "model_binding": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Model Binding",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "objective": {
+          "minLength": 1,
+          "title": "Objective",
+          "type": "string"
+        },
+        "overlay_paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Overlay Paths",
+          "type": "array"
+        },
+        "permissions": {
+          "$ref": "#/$defs/PermissionSet"
+        },
+        "required_outputs": {
+          "items": {
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Required Outputs",
+          "type": "array"
+        },
+        "retry_policy": {
+          "$ref": "#/$defs/RetryPolicy"
+        },
+        "role": {
+          "$ref": "#/$defs/AgentRole"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "skills": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Skills",
+          "type": "array"
+        },
+        "timeout_seconds": {
+          "maximum": 86400,
+          "minimum": 1,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        },
+        "tools": {
+          "items": {
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Tools",
+          "type": "array"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "name",
+        "role",
+        "objective",
+        "base_prompt",
+        "backend",
+        "model_binding",
+        "effort",
+        "permissions",
+        "context_policy",
+        "timeout_seconds",
+        "retry_policy",
+        "required_outputs"
+      ],
+      "title": "AgentProfile",
+      "type": "object"
+    },
+    "AgentRole": {
+      "enum": [
+        "diagnosis",
+        "handoff",
+        "implementation",
+        "planning",
+        "prototype",
+        "prototype-validation",
+        "research",
+        "review",
+        "synthesis",
+        "validation",
+        "verification"
+      ],
+      "title": "AgentRole",
+      "type": "string"
+    },
+    "ApprovalMode": {
+      "enum": [
+        "deny_all"
+      ],
+      "title": "ApprovalMode",
+      "type": "string"
+    },
+    "ContextPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "include_full_history": {
+          "default": false,
+          "title": "Include Full History",
+          "type": "boolean"
+        },
+        "max_bytes": {
+          "maximum": 10000000,
+          "minimum": 1,
+          "title": "Max Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "max_bytes"
+      ],
+      "title": "ContextPolicy",
+      "type": "object"
+    },
+    "Effort": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "title": "Effort",
+      "type": "string"
+    },
+    "FailureClass": {
+      "enum": [
+        "provider_transient",
+        "tool_transient",
+        "configuration",
+        "policy",
+        "timeout",
+        "invalid_output",
+        "worker_failure",
+        "cancelled"
+      ],
+      "title": "FailureClass",
+      "type": "string"
+    },
+    "MemoryPolicy": {
+      "enum": [
+        "disabled"
+      ],
+      "title": "MemoryPolicy",
+      "type": "string"
+    },
+    "PermissionSet": {
+      "additionalProperties": false,
+      "description": "Requested worker permissions; tool lists remain intentions, not enforcement.",
+      "properties": {
+        "approval_mode": {
+          "$ref": "#/$defs/ApprovalMode",
+          "default": "deny_all"
+        },
+        "external_integrations": {
+          "default": false,
+          "title": "External Integrations",
+          "type": "boolean"
+        },
+        "nested_agents": {
+          "default": false,
+          "title": "Nested Agents",
+          "type": "boolean"
+        },
+        "sandbox": {
+          "$ref": "#/$defs/SandboxMode"
+        },
+        "shell_network": {
+          "default": false,
+          "title": "Shell Network",
+          "type": "boolean"
+        },
+        "web_search": {
+          "default": false,
+          "title": "Web Search",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "sandbox"
+      ],
+      "title": "PermissionSet",
+      "type": "object"
+    },
+    "RetryPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "max_attempts": {
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Max Attempts",
+          "type": "integer"
+        },
+        "recoverable_classes": {
+          "items": {
+            "$ref": "#/$defs/FailureClass"
+          },
+          "title": "Recoverable Classes",
+          "type": "array"
+        },
+        "require_known_terminal": {
+          "default": true,
+          "title": "Require Known Terminal",
+          "type": "boolean"
+        },
+        "require_safe_retry": {
+          "default": true,
+          "title": "Require Safe Retry",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "max_attempts",
+        "recoverable_classes"
+      ],
+      "title": "RetryPolicy",
+      "type": "object"
+    },
+    "SandboxMode": {
+      "enum": [
+        "read-only",
+        "workspace-write"
+      ],
+      "title": "SandboxMode",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "agents": {
+      "items": {
+        "$ref": "#/$defs/AgentProfile"
+      },
+      "title": "Agents",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "agents"
+  ],
+  "title": "AgentCatalog",
+  "type": "object"
+}

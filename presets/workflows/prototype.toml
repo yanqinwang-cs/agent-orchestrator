@@ -1,0 +1,94 @@
+# Proposed WorkflowPreset schema v1. Conditions and stage kinds are closed enums.
+schema_version = 1
+id = "prototype"
+version = "1.0.0"
+name = "Prototype"
+max_parallelism = 1
+max_duration_seconds = 5400
+max_attempts_per_slot = 2
+max_repair_cycles = 0
+allowed_profiles = ["planner", "prototype-implementer", "implementer", "quick-validator", "handoff"]
+completion = "validated_prototype"
+required_outputs = ["handoff.summary"]
+allowed_redirects = [{ stage = "implement", allowed_profiles = ["prototype-implementer", "implementer"] }]
+
+[policy]
+allowed_backends = ["codex"]
+allowed_model_bindings = ["standard", "deep", "fast"]
+allow_optional_skip = false
+allow_count_selection = false
+allow_profile_selection = true
+allow_retry = true
+allow_permission_expansion = false
+allow_new_profiles = false
+allow_required_stage_removal = false
+
+[[stages]]
+id = "plan"
+kind = "worker"
+depends_on = []
+inputs = ["task"]
+required_outputs = ["plan"]
+when = "always"
+optional = false
+completion = "artifact_ready"
+slot_kind = "fixed"
+min_workers = 1
+max_workers = 1
+allowed_profiles = ["planner"]
+default_profile = "planner"
+
+[[stages]]
+id = "implement"
+kind = "worker"
+depends_on = ["plan"]
+inputs = ["task", "plan.plan"]
+required_outputs = ["changes"]
+when = "always"
+optional = false
+completion = "artifact_ready"
+slot_kind = "select_one"
+min_workers = 1
+max_workers = 1
+allowed_profiles = ["prototype-implementer", "implementer"]
+default_profile = "prototype-implementer"
+
+[[stages]]
+id = "integrate"
+kind = "integrate"
+depends_on = ["implement"]
+inputs = ["implement.changes"]
+required_outputs = ["revision"]
+when = "always"
+optional = false
+completion = "integration_succeeded"
+
+[[stages]]
+id = "validate"
+kind = "worker"
+depends_on = ["integrate"]
+inputs = ["task", "plan.plan", "integrate.revision"]
+required_outputs = ["report"]
+when = "always"
+optional = false
+completion = "report_passed"
+slot_kind = "fixed"
+min_workers = 1
+max_workers = 1
+allowed_profiles = ["quick-validator"]
+default_profile = "quick-validator"
+
+[[stages]]
+id = "handoff"
+kind = "worker"
+depends_on = ["validate"]
+inputs = ["task", "integrate.revision", "validate.report"]
+required_outputs = ["summary"]
+when = "always"
+optional = false
+completion = "artifact_ready"
+slot_kind = "fixed"
+min_workers = 1
+max_workers = 1
+allowed_profiles = ["handoff"]
+default_profile = "handoff"

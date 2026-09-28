@@ -1,0 +1,16 @@
+Implement milestone 1 of Agent Orchestrator in this repository.
+
+Read AGENTS.md, docs/IMPLEMENTATION_PLAN.md sections 2–4, 7, 9 and 10, and the shipped TOML fixtures before editing. This is a local Python orchestration app. The chosen runtime is a deterministic application-owned coordinator; Codex is a future WorkerBackend adapter.
+
+Build only the executable foundation and contracts:
+
+1. Create pyproject.toml for Python 3.12+, a src/orchestrator package, a committed uv.lock and development tooling: pytest, pytest-asyncio, Ruff and mypy. Use Pydantic v2 for typed configuration. Add the agent-orchestrator console entry point with --help, --version, and validate-config PATH. With no subcommand, clearly state that execution/UI is not implemented yet; do not display a fake working dashboard.
+2. Implement versioned strict models for AgentProfile, WorkflowPreset, OrchestratorPolicy, ProjectConfig, BackendSettings, RunSpec, AgentRunSpec, events and interventions. Separate immutable resolved specifications from mutable projections. Define the WorkerBackend protocol and normalized capability/event/result types without importing Codex or web-framework types into domain code.
+3. Load every supplied application TOML file, including all six workflows and the agents catalog. Implement static cross-reference validation: profile IDs, allowed specialists, acyclic dependencies, slot bounds, declared conditions, input/output bindings, required verification paths, policy ceilings and retry/time limits. Treat development.toml as development configuration, not a product agent catalog. Keep TOML syntax simple; do not introduce an expression language.
+4. Implement a pure resolver for overlays, supported model bindings and canonical snapshot hashes. Model/backend availability may be supplied by deterministic test data. Reject unsupported or missing settings instead of silently dropping them. Do not query a live model or require Codex authentication.
+5. Add a controllable fake backend and fake clock suitable for subsequent scheduler tests. Script start/progress/terminal events and steer/interrupt acknowledgements. Do not implement the scheduler, persistence layer, workspaces or web UI yet.
+6. Export JSON Schemas from the typed models. Add focused positive/negative fixtures and tests for schema loading, references, forbidden permission widening, unsupported effort, bounded slots, immutable snapshots and fake backend event ordering. Update README with the commands that now actually work.
+
+Acceptance: all shipped application presets validate; invalid fixtures fail with useful field paths; CLI help/version/config validation work; the default tests never call live providers; uv run pytest -m 'not live', uv run ruff check ., uv run ruff format --check ., and uv run mypy src pass. Preserve unrelated files. If a proposed TOML contract is inconsistent, make the smallest documented correction with a regression fixture; surface any consequential semantic change before implementing it.
+
+Stop after milestone 1. Report the implemented contracts, exact checks and results, any schema corrections, and what milestone 2 can now rely on. Do not implement Codex authentication, launch workers, add LangGraph/Deep Agents, or build later milestones in this task.

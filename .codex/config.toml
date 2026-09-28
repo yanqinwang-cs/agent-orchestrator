@@ -1,0 +1,9 @@
+# Development defaults. Project config is loaded only for trusted projects.
+# Model selection remains in the user's Codex configuration or launcher --model.
+approval_policy = "on-request"
+approvals_reviewer = "user"
+sandbox_mode = "workspace-write"
+web_search = "disabled"
+
+[sandbox_workspace_write]
+network_access = false

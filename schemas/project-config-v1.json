@@ -1,0 +1,224 @@
+{
+  "$defs": {
+    "Effort": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "title": "Effort",
+      "type": "string"
+    },
+    "MemoryPolicy": {
+      "enum": [
+        "disabled"
+      ],
+      "title": "MemoryPolicy",
+      "type": "string"
+    },
+    "ModelBindingSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_efforts": {
+          "items": {
+            "$ref": "#/$defs/Effort"
+          },
+          "title": "Allowed Efforts",
+          "type": "array"
+        },
+        "backend": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Backend",
+          "type": "string"
+        },
+        "model_id": {
+          "minLength": 1,
+          "title": "Model Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "backend",
+        "model_id",
+        "allowed_efforts"
+      ],
+      "title": "ModelBindingSettings",
+      "type": "object"
+    },
+    "ProjectContextSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "include_full_history": {
+          "default": false,
+          "title": "Include Full History",
+          "type": "boolean"
+        },
+        "max_bytes": {
+          "maximum": 10000000,
+          "minimum": 1,
+          "title": "Max Bytes",
+          "type": "integer"
+        },
+        "policy": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Policy",
+          "type": "string"
+        }
+      },
+      "required": [
+        "policy",
+        "max_bytes"
+      ],
+      "title": "ProjectContextSettings",
+      "type": "object"
+    },
+    "ProjectMemorySettings": {
+      "additionalProperties": false,
+      "properties": {
+        "policy": {
+          "$ref": "#/$defs/MemoryPolicy",
+          "default": "disabled"
+        }
+      },
+      "title": "ProjectMemorySettings",
+      "type": "object"
+    },
+    "WorkspacePolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "apply_to_original": {
+          "default": false,
+          "title": "Apply To Original",
+          "type": "boolean"
+        },
+        "integrate_into": {
+          "const": "run_worktree",
+          "default": "run_worktree",
+          "title": "Integrate Into",
+          "type": "string"
+        },
+        "require_clean_base_for_writes": {
+          "default": true,
+          "title": "Require Clean Base For Writes",
+          "type": "boolean"
+        },
+        "write_strategy": {
+          "default": "git_worktree",
+          "enum": [
+            "git_worktree",
+            "read_only"
+          ],
+          "title": "Write Strategy",
+          "type": "string"
+        }
+      },
+      "title": "WorkspacePolicy",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "agent_overlay_paths": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Agent Overlay Paths",
+      "type": "array"
+    },
+    "allowed_commands": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Allowed Commands",
+      "type": "array"
+    },
+    "allowed_workflows": {
+      "items": {
+        "minLength": 1,
+        "pattern": "^[a-z][a-z0-9_-]*$",
+        "type": "string"
+      },
+      "title": "Allowed Workflows",
+      "type": "array"
+    },
+    "context": {
+      "$ref": "#/$defs/ProjectContextSettings"
+    },
+    "id": {
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "title": "Id",
+      "type": "string"
+    },
+    "max_parallelism": {
+      "maximum": 64,
+      "minimum": 1,
+      "title": "Max Parallelism",
+      "type": "integer"
+    },
+    "memory": {
+      "$ref": "#/$defs/ProjectMemorySettings"
+    },
+    "models": {
+      "patternProperties": {
+        "^[a-z][a-z0-9_-]*$": {
+          "$ref": "#/$defs/ModelBindingSettings"
+        }
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Models",
+      "type": "object"
+    },
+    "name": {
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "path": {
+      "minLength": 1,
+      "title": "Path",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "settings_revision": {
+      "default": "1",
+      "minLength": 1,
+      "title": "Settings Revision",
+      "type": "string"
+    },
+    "workflow_overlay_paths": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Workflow Overlay Paths",
+      "type": "array"
+    },
+    "workspace": {
+      "$ref": "#/$defs/WorkspacePolicy"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "path",
+    "max_parallelism",
+    "allowed_workflows",
+    "workspace",
+    "context"
+  ],
+  "title": "ProjectConfig",
+  "type": "object"
+}

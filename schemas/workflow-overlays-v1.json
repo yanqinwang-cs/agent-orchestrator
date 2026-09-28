@@ -1,0 +1,73 @@
+{
+  "$defs": {
+    "WorkflowOverlay": {
+      "additionalProperties": false,
+      "properties": {
+        "default_profiles": {
+          "patternProperties": {
+            "^[a-z][a-z0-9_-]*$": {
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            }
+          },
+          "propertyNames": {
+            "minLength": 1
+          },
+          "title": "Default Profiles",
+          "type": "object"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "worker_counts": {
+          "patternProperties": {
+            "^[a-z][a-z0-9_-]*$": {
+              "type": "integer"
+            }
+          },
+          "propertyNames": {
+            "minLength": 1
+          },
+          "title": "Worker Counts",
+          "type": "object"
+        },
+        "workflow_id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Workflow Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id"
+      ],
+      "title": "WorkflowOverlay",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "workflows": {
+      "items": {
+        "$ref": "#/$defs/WorkflowOverlay"
+      },
+      "title": "Workflows",
+      "type": "array"
+    }
+  },
+  "required": [
+    "workflows"
+  ],
+  "title": "WorkflowOverlayFile",
+  "type": "object"
+}

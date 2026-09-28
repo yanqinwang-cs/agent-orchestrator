@@ -1,0 +1,124 @@
+{
+  "$defs": {
+    "AttemptStatus": {
+      "enum": [
+        "pending",
+        "launching",
+        "running",
+        "cancel_requested",
+        "succeeded",
+        "failed",
+        "timed_out",
+        "cancelled",
+        "outcome_unknown"
+      ],
+      "title": "AttemptStatus",
+      "type": "string"
+    },
+    "FailureClass": {
+      "enum": [
+        "provider_transient",
+        "tool_transient",
+        "configuration",
+        "policy",
+        "timeout",
+        "invalid_output",
+        "worker_failure",
+        "cancelled"
+      ],
+      "title": "FailureClass",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "artifact_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Artifact Ids",
+      "type": "array"
+    },
+    "attempt_id": {
+      "minLength": 1,
+      "title": "Attempt Id",
+      "type": "string"
+    },
+    "error_class": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FailureClass"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "error_summary": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error Summary"
+    },
+    "finished_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Finished At"
+    },
+    "receipt_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Receipt Id"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "started_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Started At"
+    },
+    "status": {
+      "$ref": "#/$defs/AttemptStatus"
+    }
+  },
+  "required": [
+    "attempt_id",
+    "status"
+  ],
+  "title": "AttemptState",
+  "type": "object"
+}

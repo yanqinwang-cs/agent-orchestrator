@@ -1,0 +1,70 @@
+{
+  "$defs": {
+    "RunStatus": {
+      "enum": [
+        "ready",
+        "running",
+        "pause_requested",
+        "paused",
+        "stopping",
+        "stopped",
+        "succeeded",
+        "failed",
+        "attention_required"
+      ],
+      "title": "RunStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Mutable projection kept separate from immutable RunSpec.",
+  "properties": {
+    "active_stages": {
+      "items": {
+        "minLength": 1,
+        "pattern": "^[a-z][a-z0-9_-]*$",
+        "type": "string"
+      },
+      "title": "Active Stages",
+      "type": "array"
+    },
+    "attempts_used": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Attempts Used",
+      "type": "integer"
+    },
+    "elapsed_seconds": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Elapsed Seconds",
+      "type": "number"
+    },
+    "revision": {
+      "minimum": 0,
+      "title": "Revision",
+      "type": "integer"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "status": {
+      "$ref": "#/$defs/RunStatus"
+    }
+  },
+  "required": [
+    "run_id",
+    "status",
+    "revision"
+  ],
+  "title": "RunState",
+  "type": "object"
+}

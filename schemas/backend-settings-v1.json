@@ -1,0 +1,159 @@
+{
+  "$defs": {
+    "ApprovalMode": {
+      "enum": [
+        "deny_all"
+      ],
+      "title": "ApprovalMode",
+      "type": "string"
+    },
+    "BackendConfig": {
+      "discriminator": {
+        "mapping": {
+          "codex_sdk": "#/$defs/CodexBackendSettings",
+          "scripted_fake": "#/$defs/FakeBackendSettings"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/CodexBackendSettings"
+        },
+        {
+          "$ref": "#/$defs/FakeBackendSettings"
+        }
+      ]
+    },
+    "CodexBackendSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_unverified_policy": {
+          "title": "Allow Unverified Policy",
+          "type": "boolean"
+        },
+        "approval_mode": {
+          "$ref": "#/$defs/ApprovalMode"
+        },
+        "auth_owner": {
+          "const": "codex",
+          "title": "Auth Owner",
+          "type": "string"
+        },
+        "cli_source": {
+          "const": "sdk_pinned_dependency",
+          "title": "Cli Source",
+          "type": "string"
+        },
+        "client_per_attempt": {
+          "title": "Client Per Attempt",
+          "type": "boolean"
+        },
+        "codex_home_env": {
+          "minLength": 1,
+          "title": "Codex Home Env",
+          "type": "string"
+        },
+        "experimental_api": {
+          "title": "Experimental Api",
+          "type": "boolean"
+        },
+        "interrupt_grace_seconds": {
+          "maximum": 300,
+          "minimum": 0,
+          "title": "Interrupt Grace Seconds",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "codex_sdk",
+          "title": "Kind",
+          "type": "string"
+        },
+        "sdk_package": {
+          "const": "openai-codex",
+          "title": "Sdk Package",
+          "type": "string"
+        },
+        "sdk_version": {
+          "minLength": 1,
+          "title": "Sdk Version",
+          "type": "string"
+        },
+        "shutdown_grace_seconds": {
+          "maximum": 300,
+          "minimum": 0,
+          "title": "Shutdown Grace Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "sdk_package",
+        "sdk_version",
+        "cli_source",
+        "client_per_attempt",
+        "auth_owner",
+        "codex_home_env",
+        "approval_mode",
+        "experimental_api",
+        "interrupt_grace_seconds",
+        "shutdown_grace_seconds",
+        "allow_unverified_policy"
+      ],
+      "title": "CodexBackendSettings",
+      "type": "object"
+    },
+    "FakeBackendSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "clock": {
+          "const": "manual",
+          "title": "Clock",
+          "type": "string"
+        },
+        "kind": {
+          "const": "scripted_fake",
+          "title": "Kind",
+          "type": "string"
+        },
+        "test_only": {
+          "const": true,
+          "title": "Test Only",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "test_only",
+        "clock"
+      ],
+      "title": "FakeBackendSettings",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "backends": {
+      "patternProperties": {
+        "^[a-z][a-z0-9_-]*$": {
+          "$ref": "#/$defs/BackendConfig"
+        }
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Backends",
+      "type": "object"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "backends"
+  ],
+  "title": "BackendSettings",
+  "type": "object"
+}

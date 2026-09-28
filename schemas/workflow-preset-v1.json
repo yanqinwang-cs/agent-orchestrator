@@ -1,0 +1,467 @@
+{
+  "$defs": {
+    "ApprovalMode": {
+      "enum": [
+        "deny_all"
+      ],
+      "title": "ApprovalMode",
+      "type": "string"
+    },
+    "Condition": {
+      "enum": [
+        "always",
+        "repair_needed",
+        "repair_not_needed"
+      ],
+      "title": "Condition",
+      "type": "string"
+    },
+    "OrchestratorPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_count_selection": {
+          "default": false,
+          "title": "Allow Count Selection",
+          "type": "boolean"
+        },
+        "allow_new_profiles": {
+          "default": false,
+          "title": "Allow New Profiles",
+          "type": "boolean"
+        },
+        "allow_optional_skip": {
+          "default": false,
+          "title": "Allow Optional Skip",
+          "type": "boolean"
+        },
+        "allow_permission_expansion": {
+          "default": false,
+          "title": "Allow Permission Expansion",
+          "type": "boolean"
+        },
+        "allow_profile_selection": {
+          "default": false,
+          "title": "Allow Profile Selection",
+          "type": "boolean"
+        },
+        "allow_required_stage_removal": {
+          "default": false,
+          "title": "Allow Required Stage Removal",
+          "type": "boolean"
+        },
+        "allow_retry": {
+          "default": true,
+          "title": "Allow Retry",
+          "type": "boolean"
+        },
+        "allowed_backends": {
+          "items": {
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Allowed Backends",
+          "type": "array"
+        },
+        "allowed_model_bindings": {
+          "items": {
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Allowed Model Bindings",
+          "type": "array"
+        },
+        "permission_ceiling": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PermissionSet"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "allowed_backends",
+        "allowed_model_bindings"
+      ],
+      "title": "OrchestratorPolicy",
+      "type": "object"
+    },
+    "PermissionSet": {
+      "additionalProperties": false,
+      "description": "Requested worker permissions; tool lists remain intentions, not enforcement.",
+      "properties": {
+        "approval_mode": {
+          "$ref": "#/$defs/ApprovalMode",
+          "default": "deny_all"
+        },
+        "external_integrations": {
+          "default": false,
+          "title": "External Integrations",
+          "type": "boolean"
+        },
+        "nested_agents": {
+          "default": false,
+          "title": "Nested Agents",
+          "type": "boolean"
+        },
+        "sandbox": {
+          "$ref": "#/$defs/SandboxMode"
+        },
+        "shell_network": {
+          "default": false,
+          "title": "Shell Network",
+          "type": "boolean"
+        },
+        "web_search": {
+          "default": false,
+          "title": "Web Search",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "sandbox"
+      ],
+      "title": "PermissionSet",
+      "type": "object"
+    },
+    "RedirectRule": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_profiles": {
+          "items": {
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Allowed Profiles",
+          "type": "array"
+        },
+        "stage": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Stage",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stage",
+        "allowed_profiles"
+      ],
+      "title": "RedirectRule",
+      "type": "object"
+    },
+    "SandboxMode": {
+      "enum": [
+        "read-only",
+        "workspace-write"
+      ],
+      "title": "SandboxMode",
+      "type": "string"
+    },
+    "SlotKind": {
+      "enum": [
+        "fixed",
+        "select_one",
+        "elastic"
+      ],
+      "title": "SlotKind",
+      "type": "string"
+    },
+    "StageCompletion": {
+      "enum": [
+        "artifact_ready",
+        "report_present",
+        "report_passed",
+        "integration_succeeded",
+        "decision_recorded"
+      ],
+      "title": "StageCompletion",
+      "type": "string"
+    },
+    "StageKind": {
+      "enum": [
+        "worker",
+        "integrate",
+        "integration_check",
+        "repair_gate"
+      ],
+      "title": "StageKind",
+      "type": "string"
+    },
+    "WorkflowCompletion": {
+      "enum": [
+        "reports_present",
+        "validated_prototype",
+        "verified_revision",
+        "verified_research"
+      ],
+      "title": "WorkflowCompletion",
+      "type": "string"
+    },
+    "WorkflowStage": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_profiles": {
+          "items": {
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Allowed Profiles",
+          "type": "array"
+        },
+        "completion": {
+          "$ref": "#/$defs/StageCompletion"
+        },
+        "default_profile": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default Profile"
+        },
+        "depends_on": {
+          "items": {
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "inputs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/StageKind"
+        },
+        "max_workers": {
+          "anyOf": [
+            {
+              "maximum": 32,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Workers"
+        },
+        "min_workers": {
+          "anyOf": [
+            {
+              "maximum": 32,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Workers"
+        },
+        "optional": {
+          "default": false,
+          "title": "Optional",
+          "type": "boolean"
+        },
+        "parallel_group": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parallel Group"
+        },
+        "required_outputs": {
+          "items": {
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Required Outputs",
+          "type": "array"
+        },
+        "slot_briefs": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Slot Briefs",
+          "type": "array"
+        },
+        "slot_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SlotKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "when": {
+          "$ref": "#/$defs/Condition",
+          "default": "always"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "required_outputs",
+        "completion"
+      ],
+      "title": "WorkflowStage",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "allowed_profiles": {
+      "items": {
+        "minLength": 1,
+        "pattern": "^[a-z][a-z0-9_-]*$",
+        "type": "string"
+      },
+      "title": "Allowed Profiles",
+      "type": "array"
+    },
+    "allowed_redirects": {
+      "items": {
+        "$ref": "#/$defs/RedirectRule"
+      },
+      "title": "Allowed Redirects",
+      "type": "array"
+    },
+    "branch_outputs": {
+      "additionalProperties": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "title": "Branch Outputs",
+      "type": "object"
+    },
+    "completion": {
+      "$ref": "#/$defs/WorkflowCompletion"
+    },
+    "id": {
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "title": "Id",
+      "type": "string"
+    },
+    "max_attempts_per_slot": {
+      "maximum": 10,
+      "minimum": 1,
+      "title": "Max Attempts Per Slot",
+      "type": "integer"
+    },
+    "max_duration_seconds": {
+      "maximum": 604800,
+      "minimum": 1,
+      "title": "Max Duration Seconds",
+      "type": "integer"
+    },
+    "max_parallelism": {
+      "maximum": 64,
+      "minimum": 1,
+      "title": "Max Parallelism",
+      "type": "integer"
+    },
+    "max_repair_cycles": {
+      "maximum": 10,
+      "minimum": 0,
+      "title": "Max Repair Cycles",
+      "type": "integer"
+    },
+    "name": {
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "policy": {
+      "$ref": "#/$defs/OrchestratorPolicy"
+    },
+    "required_outputs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Required Outputs",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "stages": {
+      "items": {
+        "$ref": "#/$defs/WorkflowStage"
+      },
+      "title": "Stages",
+      "type": "array"
+    },
+    "version": {
+      "minLength": 1,
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "name",
+    "max_parallelism",
+    "max_duration_seconds",
+    "max_attempts_per_slot",
+    "max_repair_cycles",
+    "allowed_profiles",
+    "completion",
+    "required_outputs",
+    "policy",
+    "stages"
+  ],
+  "title": "WorkflowPreset",
+  "type": "object"
+}

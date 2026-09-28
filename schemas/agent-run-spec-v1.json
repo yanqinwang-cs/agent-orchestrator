@@ -1,0 +1,222 @@
+{
+  "$defs": {
+    "ApprovalMode": {
+      "enum": [
+        "deny_all"
+      ],
+      "title": "ApprovalMode",
+      "type": "string"
+    },
+    "Effort": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "title": "Effort",
+      "type": "string"
+    },
+    "InputEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "content_hash": {
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "source": {
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "content_hash",
+        "source",
+        "reason"
+      ],
+      "title": "InputEntry",
+      "type": "object"
+    },
+    "PermissionSet": {
+      "additionalProperties": false,
+      "description": "Requested worker permissions; tool lists remain intentions, not enforcement.",
+      "properties": {
+        "approval_mode": {
+          "$ref": "#/$defs/ApprovalMode",
+          "default": "deny_all"
+        },
+        "external_integrations": {
+          "default": false,
+          "title": "External Integrations",
+          "type": "boolean"
+        },
+        "nested_agents": {
+          "default": false,
+          "title": "Nested Agents",
+          "type": "boolean"
+        },
+        "sandbox": {
+          "$ref": "#/$defs/SandboxMode"
+        },
+        "shell_network": {
+          "default": false,
+          "title": "Shell Network",
+          "type": "boolean"
+        },
+        "web_search": {
+          "default": false,
+          "title": "Web Search",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "sandbox"
+      ],
+      "title": "PermissionSet",
+      "type": "object"
+    },
+    "SandboxMode": {
+      "enum": [
+        "read-only",
+        "workspace-write"
+      ],
+      "title": "SandboxMode",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "attempt_id": {
+      "minLength": 1,
+      "title": "Attempt Id",
+      "type": "string"
+    },
+    "backend": {
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "title": "Backend",
+      "type": "string"
+    },
+    "effort": {
+      "$ref": "#/$defs/Effort"
+    },
+    "input_manifest": {
+      "items": {
+        "$ref": "#/$defs/InputEntry"
+      },
+      "title": "Input Manifest",
+      "type": "array"
+    },
+    "instructions": {
+      "minLength": 1,
+      "title": "Instructions",
+      "type": "string"
+    },
+    "model_id": {
+      "minLength": 1,
+      "title": "Model Id",
+      "type": "string"
+    },
+    "parent_attempt_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Parent Attempt Id"
+    },
+    "permissions": {
+      "$ref": "#/$defs/PermissionSet"
+    },
+    "profile_id": {
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "title": "Profile Id",
+      "type": "string"
+    },
+    "profile_version": {
+      "minLength": 1,
+      "title": "Profile Version",
+      "type": "string"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "run_snapshot_hash": {
+      "minLength": 1,
+      "title": "Run Snapshot Hash",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "skills": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Skills",
+      "type": "array"
+    },
+    "tools": {
+      "items": {
+        "minLength": 1,
+        "pattern": "^[a-z][a-z0-9_-]*$",
+        "type": "string"
+      },
+      "title": "Tools",
+      "type": "array"
+    },
+    "workspace_revision": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Workspace Revision"
+    }
+  },
+  "required": [
+    "run_id",
+    "attempt_id",
+    "profile_id",
+    "profile_version",
+    "instructions",
+    "input_manifest",
+    "backend",
+    "model_id",
+    "effort",
+    "permissions",
+    "skills",
+    "tools",
+    "run_snapshot_hash"
+  ],
+  "title": "AgentRunSpec",
+  "type": "object"
+}

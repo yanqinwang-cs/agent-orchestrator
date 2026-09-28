@@ -1,0 +1,400 @@
+{
+  "$defs": {
+    "ArtifactEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "content_hash": {
+          "minLength": 1,
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "relative_path": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Relative Path"
+        },
+        "schema_id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Schema Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "schema_id",
+        "content_hash"
+      ],
+      "title": "ArtifactEntry",
+      "type": "object"
+    },
+    "OutputStatus": {
+      "enum": [
+        "pass",
+        "fail",
+        "blocked"
+      ],
+      "title": "OutputStatus",
+      "type": "string"
+    },
+    "Usage": {
+      "additionalProperties": false,
+      "properties": {
+        "input_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Tokens"
+        },
+        "output_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Tokens"
+        },
+        "total_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Tokens"
+        }
+      },
+      "title": "Usage",
+      "type": "object"
+    },
+    "WorkerDisconnectedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_id": {
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "disconnected",
+          "title": "Kind",
+          "type": "string"
+        },
+        "occurred_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Occurred At"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "attempt_id",
+        "sequence",
+        "kind",
+        "reason"
+      ],
+      "title": "WorkerDisconnectedEvent",
+      "type": "object"
+    },
+    "WorkerProgressEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_id": {
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "progress",
+          "title": "Kind",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "occurred_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Occurred At"
+        },
+        "progress": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Progress"
+        },
+        "sequence": {
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "attempt_id",
+        "sequence",
+        "kind",
+        "message"
+      ],
+      "title": "WorkerProgressEvent",
+      "type": "object"
+    },
+    "WorkerResult": {
+      "additionalProperties": false,
+      "description": "A normalized output envelope with provider receipt details.",
+      "properties": {
+        "artifacts": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ArtifactEntry"
+          },
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "attempt_id": {
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "input_revision": {
+          "minLength": 1,
+          "title": "Input Revision",
+          "type": "string"
+        },
+        "provider_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Status"
+        },
+        "schema_id": {
+          "const": "artifact-envelope-v1",
+          "default": "artifact-envelope-v1",
+          "title": "Schema Id",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/OutputStatus"
+        },
+        "summary": {
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Usage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workspace_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workspace Revision"
+        }
+      },
+      "required": [
+        "attempt_id",
+        "input_revision",
+        "status",
+        "summary"
+      ],
+      "title": "WorkerResult",
+      "type": "object"
+    },
+    "WorkerStartedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_id": {
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "handle_id": {
+          "minLength": 1,
+          "title": "Handle Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "started",
+          "title": "Kind",
+          "type": "string"
+        },
+        "occurred_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Occurred At"
+        },
+        "sequence": {
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "attempt_id",
+        "sequence",
+        "kind",
+        "handle_id"
+      ],
+      "title": "WorkerStartedEvent",
+      "type": "object"
+    },
+    "WorkerTerminalEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_id": {
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "terminal",
+          "title": "Kind",
+          "type": "string"
+        },
+        "occurred_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Occurred At"
+        },
+        "result": {
+          "$ref": "#/$defs/WorkerResult"
+        },
+        "sequence": {
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "attempt_id",
+        "sequence",
+        "kind",
+        "result"
+      ],
+      "title": "WorkerTerminalEvent",
+      "type": "object"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "disconnected": "#/$defs/WorkerDisconnectedEvent",
+      "progress": "#/$defs/WorkerProgressEvent",
+      "started": "#/$defs/WorkerStartedEvent",
+      "terminal": "#/$defs/WorkerTerminalEvent"
+    },
+    "propertyName": "kind"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/WorkerStartedEvent"
+    },
+    {
+      "$ref": "#/$defs/WorkerProgressEvent"
+    },
+    {
+      "$ref": "#/$defs/WorkerTerminalEvent"
+    },
+    {
+      "$ref": "#/$defs/WorkerDisconnectedEvent"
+    }
+  ]
+}
