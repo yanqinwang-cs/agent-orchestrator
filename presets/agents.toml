@@ -1,4 +1,5 @@
-# Proposed product AgentProfile catalog; distinct from development Codex presets.
+# Current v1 product AgentProfile defaults; distinct from repository development Codex presets.
+# Profile backend/model fields are fixed/default bindings today; see the plan for the target split.
 schema_version = 1
 
 [[agents]]

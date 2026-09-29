@@ -1,14 +1,16 @@
-# Agent Orchestrator — Milestones 1–3 foundation
+# Agent Orchestrator
 
-Milestones 1–3 supply typed configuration, static validation, deterministic run resolution, versioned JSON Schemas, a durable local run ledger, and a bounded coordinator that executes the six shipped workflows with scripted fake workers. The CLI still provides setup and validation commands only; real Codex execution, project worktrees and the web UI are later milestones.
+Agent Orchestrator is a local-first, inspectable harness for running reusable specialist agents through bounded workflows. It combines deterministic execution control, optional semantic decision routing, and pluggable harness-backed or direct-model worker runtimes.
 
-**Decision:** a small deterministic Python coordinator, SQLite, the official Python Codex SDK, and a FastAPI/Jinja local UI. The coordinator owns workflow state; Codex owns each worker's model, tools and authentication. No coordinator model is required in v1.
+It is a personal open-source developer tool. Success means practical usefulness, user control, inspectability, reproducibility, flexibility and strong engineering quality.
 
-Start with [the implementation plan](docs/IMPLEMENTATION_PLAN.md). It contains the architecture, contracts, state machine, UI, tests and eight milestones. [The integration audit](docs/INTEGRATION_AUDIT.md) records primary sources, version checks and the remaining integration gates.
+Milestones 1–3 are complete: typed configuration, deterministic run resolution, versioned JSON Schemas, the SQLite ledger, and an offline coordinator for all six shipped workflows using scripted fake workers. The deterministic coordinator and ledger remain authoritative for workflow progression, policy, concurrency, retries, handoffs and persisted state. A bounded `DecisionEngine` is planned for milestone 5; it may return typed recommendations, while the coordinator validates and executes them.
+
+Codex is planned as the first real worker backend because it fits the existing subscription-backed workflow. The current runtime implements only the fake backend; it does not yet launch Codex, create project worktrees or provide a web UI. See the [implementation plan](docs/IMPLEMENTATION_PLAN.md) for target architecture, contracts and the ten-milestone roadmap, and the [integration audit](docs/INTEGRATION_AUDIT.md) for Codex evidence and integration limits.
 
 ## Set up and validate
 
-Use Python 3.12+ and [uv](https://docs.astral.sh/uv/getting-started/installation/). SQLite comes with Python. The first three milestones do not need Node, Codex sign-in, or live model access.
+Use Python 3.12+ and [uv](https://docs.astral.sh/uv/getting-started/installation/). SQLite comes with Python. The completed first three milestones need no Node, Codex sign-in or live model access.
 
 Install the locked development dependencies and validate the shipped configuration:
 
@@ -47,12 +49,14 @@ With no subcommand, the CLI reports that run commands and the UI are not impleme
 | `docs/IMPLEMENTATION_PLAN.md` | Authoritative product contracts and milestone acceptance |
 | `docs/INTEGRATION_AUDIT.md` | Runtime choice, Codex integration and evidence boundaries |
 | `docs/DEVELOPMENT.md` | Development presets, skills and dependency policy |
-| `tasks/01-foundation.md` | Exact first implementation task |
+| `tasks/01-foundation.md` | Historical milestone 1 task specification |
 | `src/orchestrator/` | Versioned models, config validation, pure resolver, bounded execution coordinator, CLI, fake backend, SQLite ledger and artifact store |
 | `schemas/` | JSON Schemas generated from the Pydantic models |
 | `tests/` | Offline schema, resolver, validation, CLI and fake-backend tests |
 
 The application TOML files are schema-v1 product fixtures. `config/development.toml` remains a separate development preset catalog; it is loaded through its own model and never becomes product agent profiles.
+
+Product `AgentProfile` records currently carry a default backend and model-binding alias. The v1 resolver can vary the model binding and effort within the profile's backend and workflow policy; selecting a different runtime requires the planned versioned execution-binding contract. Repository development presets remain Codex CLI instructions for working on this project and do not define product worker runtimes.
 
 ## Durable storage
 
@@ -66,4 +70,4 @@ The application TOML files are schema-v1 product fixtures. `config/development.t
 
 The scripted `FakeBackend` can hold start acknowledgements and worker events on explicit barriers. Its manual clock supports deterministic timeout tests. The end-to-end suite drives Review, Prototype, Feature, Debug, Research and Final handoff offline, including both Feature branches.
 
-The normalized worker envelope currently contains output names, schema IDs, hashes and a summary, but no report or patch bytes and no registry of stage-specific body schemas. The coordinator checks envelope identity, input/workspace revisions, required output names, hash shape and safe relative paths. It cannot inspect report sections or verify that a summary labels limitations or unresolved claims. Content-level validation must be specified before the real workspace and worker milestones.
+The normalized worker envelope currently contains output names, schema IDs, hashes and a summary, but no report or patch bytes and no registry of stage-specific body schemas. The coordinator checks envelope identity, input/workspace revisions, required output names, hash shape and safe relative paths. It cannot inspect report sections or verify that a summary labels limitations or unresolved claims. Typed payload contracts and content validation are planned before real write workflows.

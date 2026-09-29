@@ -1,4 +1,4 @@
-# Proposed WorkflowPreset schema v1. Conditions and stage kinds are closed enums.
+# Shipped WorkflowPreset schema v1. Conditions and stage kinds are closed enums.
 schema_version = 1
 id = "review"
 version = "1.0.0"

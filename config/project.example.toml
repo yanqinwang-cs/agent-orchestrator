@@ -18,7 +18,7 @@ apply_to_original = false
 
 [models]
 # Empty catalog is valid project setup but blocks real runs until selected.
-# The UI populates bindings from backend model discovery, e.g.:
+# When the UI is implemented, it can populate bindings from approved backend model discovery, e.g.:
 # [models.standard]
 # backend = "codex"
 # model_id = "<a concrete ID returned by this account's model list>"

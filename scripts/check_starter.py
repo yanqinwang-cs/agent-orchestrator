@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check starter TOML syntax and references; full typed validation is milestone 1."""
+"""Check basic TOML references as a lightweight supplement to typed config validation."""
 
 from __future__ import annotations
 
@@ -87,4 +87,4 @@ def check(root: Path) -> tuple[int, int, int]:
 if __name__ == "__main__":
     counts = check(Path(__file__).resolve().parents[1])
     print(f"Checked {counts[0]} TOML files, {counts[1]} agents and {counts[2]} workflows.")
-    print("Syntax and basic cross-references passed; full typed validation is milestone 1.")
+    print("Syntax and basic cross-references passed; run validate-config for typed validation.")
