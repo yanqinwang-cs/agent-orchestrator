@@ -182,9 +182,12 @@ def resolve_run(
                 f"overrides.{key}: profile is not selected by this resolved workflow"
             )
 
+    redirect_profile_ids = {
+        profile_id for rule in workflow.allowed_redirects for profile_id in rule.allowed_profiles
+    }
     resolved_profiles: list[ResolvedProfile] = []
     resolved_bindings: dict[tuple[str, str], ResolvedModelBinding] = {}
-    for profile_id in sorted(selected_profile_ids):
+    for profile_id in sorted(selected_profile_ids | redirect_profile_ids):
         profile = overlaid_profiles[profile_id]
         model_alias = run_overrides.model_bindings.get(profile_id, profile.model_binding)
         effort = run_overrides.efforts.get(profile_id, profile.effort)

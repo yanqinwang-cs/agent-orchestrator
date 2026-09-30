@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 from uuid import UUID
 
 from orchestrator.domain.backend import (
@@ -16,16 +19,24 @@ from orchestrator.domain.backend import (
     ShutdownReceipt,
     SteerCommand,
     WorkerEvent,
+    WorkerFailureEvent,
     WorkerHandle,
     WorkerIdentity,
+    WorkerResult,
+    WorkerTerminalEvent,
 )
-from orchestrator.domain.models import AgentRunSpec, Effort, FailureClass
+from orchestrator.domain.models import AgentRunSpec, AttemptStatus, Effort, FailureClass
 
 
 @dataclass(frozen=True)
 class ScriptedAck:
     accepted: bool = True
     reason: str | None = None
+    supported: bool = True
+    unknown: bool = False
+    disconnect: bool = False
+    barrier: bool = False
+    consumed: bool = True
 
 
 @dataclass(frozen=True)
@@ -36,6 +47,8 @@ class AttemptScript:
     start_failure: ScriptedFailure | None = None
     start_barrier: bool = False
     event_barrier: bool | None = None
+    close_receipts: tuple[ShutdownReceipt, ...] = (ShutdownReceipt(settled=True),)
+    reconciliations: tuple[Reconciliation, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -123,6 +136,16 @@ class FakeBackend:
         self._specs_changed = asyncio.Event()
         self._steer_index: dict[str, int] = {}
         self._interrupt_index: dict[str, int] = {}
+        self._close_index: dict[str, int] = {}
+        self._inspect_index: dict[str, int] = {}
+        self._known_status: dict[str, AttemptStatus] = {}
+        self._terminal_results: dict[str, WorkerResult] = {}
+        self._failure_details: dict[str, tuple[FailureClass, bool]] = {}
+        self._effective_input_revisions: dict[str, str] = {}
+        self._closed: set[str] = set()
+        self._control_waiting: dict[tuple[str, str, int], asyncio.Event] = {}
+        self._control_permits: dict[tuple[str, str, int], asyncio.Event] = {}
+        self._seen_controls: dict[UUID, ControlAck] = {}
 
     async def capabilities(self) -> BackendCapabilities:
         return BackendCapabilities(
@@ -184,6 +207,9 @@ class FakeBackend:
         )
         self._handles[attempt_id] = handle
         self._specs[attempt_id] = spec
+        self._known_status[attempt_id] = AttemptStatus.RUNNING
+        self._closed.discard(attempt_id)
+        self._effective_input_revisions[attempt_id] = self._input_revision(spec)
         changed = self._specs_changed
         self._specs_changed = asyncio.Event()
         changed.set()
@@ -236,6 +262,21 @@ class FakeBackend:
             if release_automatically:
                 self.release_next(attempt_id)
             await self._permits[(attempt_id, index)].wait()
+            if attempt_id in self._closed:
+                self._known_status[attempt_id] = AttemptStatus.CANCELLED
+                return
+            if isinstance(event, WorkerTerminalEvent):
+                result = event.result
+                if result.input_revision in {"effective", "*"}:
+                    result = result.model_copy(
+                        update={"input_revision": self._effective_input_revisions[attempt_id]}
+                    )
+                    event = event.model_copy(update={"result": result})
+                self._known_status[attempt_id] = AttemptStatus.SUCCEEDED
+                self._terminal_results[attempt_id] = result
+            elif isinstance(event, WorkerFailureEvent):
+                self._known_status[attempt_id] = AttemptStatus.FAILED
+                self._failure_details[attempt_id] = (event.failure_class, event.safe_to_retry)
             yield event
 
     async def wait_until_waiting(self, attempt_id: str, index: int) -> None:
@@ -256,33 +297,182 @@ class FakeBackend:
         self._next_release[attempt_id] = index + 1
 
     async def steer(self, handle: WorkerHandle, command: SteerCommand) -> ControlAck:
-        return self._ack(handle, command.command_id, steer=True)
+        return await self._ack(handle, command.command_id, steer=True, command=command)
 
     async def interrupt(self, handle: WorkerHandle, command_id: UUID) -> ControlAck:
-        return self._ack(handle, command_id, steer=False)
+        return await self._ack(handle, command_id, steer=False)
 
     async def inspect(self, identity: WorkerIdentity) -> Reconciliation:
-        known = identity.attempt_id in self._handles
+        handle = self._handles.get(identity.attempt_id)
+        if handle is not None and (
+            handle.backend != identity.backend
+            or (identity.session_id is not None and handle.session_id != identity.session_id)
+            or (identity.thread_id is not None and handle.thread_id != identity.thread_id)
+            or (identity.turn_id is not None and handle.turn_id != identity.turn_id)
+            or (
+                identity.lifecycle_owner_id is not None
+                and handle.lifecycle_owner_id != identity.lifecycle_owner_id
+            )
+        ):
+            return Reconciliation(known=False, detail="persisted worker identity did not match")
+        script = self._scripts.get(identity.attempt_id)
+        if script is not None and script.reconciliations:
+            index = self._inspect_index.get(identity.attempt_id, 0)
+            self._inspect_index[identity.attempt_id] = index + 1
+            reconciliation = script.reconciliations[min(index, len(script.reconciliations) - 1)]
+            if reconciliation.known and reconciliation.status is not None:
+                self._known_status[identity.attempt_id] = reconciliation.status
+                if reconciliation.terminal_result is not None:
+                    self._terminal_results[identity.attempt_id] = reconciliation.terminal_result
+                if reconciliation.status in {
+                    AttemptStatus.SUCCEEDED,
+                    AttemptStatus.FAILED,
+                    AttemptStatus.CANCELLED,
+                    AttemptStatus.TIMED_OUT,
+                }:
+                    for (attempt_id, _event_index), permit in self._permits.items():
+                        if attempt_id == identity.attempt_id:
+                            permit.set()
+            return reconciliation
+        status = self._known_status.get(identity.attempt_id)
+        if status is None:
+            return Reconciliation(known=False, detail="fake backend has no evidence for attempt")
+        failure = self._failure_details.get(identity.attempt_id)
         return Reconciliation(
-            known=known, detail="scripted fake state" if known else "unknown attempt"
+            known=True,
+            status=status,
+            terminal_result=self._terminal_results.get(identity.attempt_id),
+            failure_class=failure[0] if failure else None,
+            safe_to_retry=failure[1] if failure else False,
+            effective_input_revision=self._effective_input_revisions.get(identity.attempt_id),
+            detail="scripted fake state",
         )
 
     async def close(self, handle: WorkerHandle) -> ShutdownReceipt:
         if self._handles.get(handle.attempt_id) != handle:
             return ShutdownReceipt(settled=False, detail="unknown handle")
-        return ShutdownReceipt(settled=True, detail="fake handle closed")
+        script = self._scripts[handle.attempt_id]
+        index = self._close_index.get(handle.attempt_id, 0)
+        self._close_index[handle.attempt_id] = index + 1
+        if not script.close_receipts:
+            return ShutdownReceipt(settled=False, detail="no shutdown receipt was scripted")
+        receipt = script.close_receipts[min(index, len(script.close_receipts) - 1)]
+        if receipt.settled and self._known_status.get(handle.attempt_id) not in {
+            AttemptStatus.SUCCEEDED,
+            AttemptStatus.FAILED,
+        }:
+            self._known_status[handle.attempt_id] = AttemptStatus.CANCELLED
+        if receipt.settled:
+            self._closed.add(handle.attempt_id)
+            for (attempt_id, _index), permit in self._permits.items():
+                if attempt_id == handle.attempt_id:
+                    permit.set()
+        return receipt
 
-    def _ack(self, handle: WorkerHandle, command_id: UUID, *, steer: bool) -> ControlAck:
+    async def _ack(
+        self,
+        handle: WorkerHandle,
+        command_id: UUID,
+        *,
+        steer: bool,
+        command: SteerCommand | None = None,
+    ) -> ControlAck:
+        prior = self._seen_controls.get(command_id)
+        if prior is not None:
+            return prior
         script = self._scripts.get(handle.attempt_id)
         if script is None or self._handles.get(handle.attempt_id) != handle:
             return ControlAck(command_id=command_id, accepted=False, reason="unknown handle")
+        if self._known_status.get(handle.attempt_id) in {
+            AttemptStatus.SUCCEEDED,
+            AttemptStatus.FAILED,
+            AttemptStatus.CANCELLED,
+            AttemptStatus.TIMED_OUT,
+        }:
+            ack = ControlAck(
+                command_id=command_id,
+                accepted=False,
+                reason="worker already terminal",
+            )
+            self._seen_controls[command_id] = ack
+            return ack
+        if steer and command is not None and command.expected_turn_id != handle.turn_id:
+            ack = ControlAck(command_id=command_id, accepted=False, reason="turn identity mismatch")
+            self._seen_controls[command_id] = ack
+            return ack
         counters = self._steer_index if steer else self._interrupt_index
         acks = script.steer_acks if steer else script.interrupt_acks
         index = counters.get(handle.attempt_id, 0)
         counters[handle.attempt_id] = index + 1
+        control_kind = "steer" if steer else "interrupt"
+        key = (handle.attempt_id, control_kind, index)
+        waiting = self._control_waiting.setdefault(key, asyncio.Event())
+        permit = self._control_permits.setdefault(key, asyncio.Event())
+        waiting.set()
         if index >= len(acks):
-            return ControlAck(
+            ack = ControlAck(
                 command_id=command_id, accepted=False, reason="no scripted acknowledgement"
             )
+            self._seen_controls[command_id] = ack
+            return ack
         result = acks[index]
-        return ControlAck(command_id=command_id, accepted=result.accepted, reason=result.reason)
+        if result.barrier:
+            await permit.wait()
+        if self._known_status.get(handle.attempt_id) in {
+            AttemptStatus.SUCCEEDED,
+            AttemptStatus.FAILED,
+            AttemptStatus.CANCELLED,
+            AttemptStatus.TIMED_OUT,
+        }:
+            ack = ControlAck(
+                command_id=command_id,
+                accepted=False,
+                reason="worker already terminal",
+            )
+            self._seen_controls[command_id] = ack
+            return ack
+        if result.disconnect:
+            raise ConnectionError("scripted backend disconnect during control")
+        if result.unknown:
+            raise TimeoutError("scripted control acknowledgement was lost")
+        ack = ControlAck(
+            command_id=command_id,
+            accepted=result.accepted,
+            supported=result.supported,
+            reason=result.reason,
+        )
+        self._seen_controls[command_id] = ack
+        if (
+            steer
+            and ack.accepted
+            and command is not None
+            and result.consumed
+            and command.effective_input_revision is not None
+        ):
+            self._effective_input_revisions[handle.attempt_id] = command.effective_input_revision
+        return ack
+
+    async def wait_until_control_waiting(
+        self, attempt_id: str, control: Literal["steer", "interrupt"], index: int = 0
+    ) -> None:
+        key = (attempt_id, control, index)
+        waiting = self._control_waiting.setdefault(key, asyncio.Event())
+        await waiting.wait()
+
+    def release_control(
+        self, attempt_id: str, control: Literal["steer", "interrupt"], index: int = 0
+    ) -> None:
+        key = (attempt_id, control, index)
+        permit = self._control_permits.setdefault(key, asyncio.Event())
+        permit.set()
+
+    @staticmethod
+    def _input_revision(spec: AgentRunSpec) -> str:
+        payload = json.dumps(
+            [entry.model_dump(mode="json") for entry in spec.input_manifest],
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()

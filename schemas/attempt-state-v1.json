@@ -44,6 +44,18 @@
       "title": "Attempt Id",
       "type": "string"
     },
+    "effective_input_revision": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Effective Input Revision"
+    },
     "error_class": {
       "anyOf": [
         {
@@ -80,6 +92,11 @@
       "default": null,
       "title": "Finished At"
     },
+    "input_revision_uncertain": {
+      "default": false,
+      "title": "Input Revision Uncertain",
+      "type": "boolean"
+    },
     "receipt_id": {
       "anyOf": [
         {
@@ -91,6 +108,11 @@
       ],
       "default": null,
       "title": "Receipt Id"
+    },
+    "retry_authorized": {
+      "default": false,
+      "title": "Retry Authorized",
+      "type": "boolean"
     },
     "safe_to_retry": {
       "default": false,
@@ -118,6 +140,78 @@
     },
     "status": {
       "$ref": "#/$defs/AttemptStatus"
+    },
+    "worker_backend_version": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Worker Backend Version"
+    },
+    "worker_handle_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Worker Handle Id"
+    },
+    "worker_lifecycle_owner_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Worker Lifecycle Owner Id"
+    },
+    "worker_session_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Worker Session Id"
+    },
+    "worker_thread_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Worker Thread Id"
+    },
+    "worker_turn_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Worker Turn Id"
     }
   },
   "required": [

@@ -18,6 +18,9 @@ from orchestrator.domain.models import (
     FrozenModel,
     Handoff,
     Identifier,
+    Intervention,
+    InterventionKind,
+    InterventionTargetScope,
     NonEmpty,
     OutboxStatus,
     ProjectConfig,
@@ -56,6 +59,8 @@ class RunProjectionUpdate(FrozenModel):
     active_stages: tuple[Identifier, ...] | None = None
     attempts_used: int | None = Field(default=None, ge=0)
     elapsed_seconds: float | None = Field(default=None, ge=0)
+    attention_reason: str | None = None
+    resume_status: RunStatus | None = None
 
 
 class AttemptRegistration(FrozenModel):
@@ -199,6 +204,104 @@ class ArtifactManifest(FrozenModel):
     created_at: datetime
 
 
+class ControlDeliveryStatus(StrEnum):
+    NOT_REQUIRED = "not_required"
+    PENDING = "pending"
+    DELIVERING = "delivering"
+    ACKNOWLEDGED = "acknowledged"
+    REJECTED = "rejected"
+    UNSUPPORTED = "unsupported"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
+
+
+class ControlDelivery(FrozenModel):
+    schema_version: Literal[1] = 1
+    action_id: UUID
+    attempt_id: NonEmpty
+    status: ControlDeliveryStatus
+    requested_at: datetime
+    attempted_at: datetime | None = None
+    completed_at: datetime | None = None
+    detail: str | None = None
+    effective_input_revision: str | None = None
+    worker_handle_id: str | None = None
+    worker_thread_id: str | None = None
+    worker_turn_id: str | None = None
+
+
+class InterventionRecord(FrozenModel):
+    """Inspectable, versioned lifecycle state for one accepted or rejected command."""
+
+    schema_version: Literal[1] = 1
+    command_id: UUID
+    run_id: NonEmpty
+    actor: NonEmpty
+    target_scope: InterventionTargetScope
+    target_id: NonEmpty
+    expected_run_revision: int = Field(ge=0)
+    kind: InterventionKind
+    payload: dict[str, Any]
+    requested_at: datetime
+    validation_outcome: Literal["accepted", "rejected"]
+    validation_detail: str | None = None
+    delivery_state: ControlDeliveryStatus | None = None
+    deliveries: tuple[ControlDelivery, ...] = ()
+    resulting_run_revision: int | None = Field(default=None, ge=0)
+    resulting_attempt_revision: str | None = None
+
+    @model_validator(mode="after")
+    def require_delivery_state(self) -> InterventionRecord:
+        if self.deliveries and self.delivery_state is None:
+            raise ValueError("delivery state is required when a control delivery exists")
+        if self.validation_outcome == "rejected" and self.deliveries:
+            raise ValueError("rejected intervention cannot have control deliveries")
+        return self
+
+    @classmethod
+    def from_request(
+        cls,
+        request: Intervention,
+        *,
+        run_id: str,
+        target_scope: InterventionTargetScope,
+        target_id: str,
+        requested_at: datetime,
+        validation_outcome: Literal["accepted", "rejected"],
+        validation_detail: str | None = None,
+        delivery_state: ControlDeliveryStatus | None = None,
+        deliveries: tuple[ControlDelivery, ...] = (),
+        resulting_run_revision: int | None = None,
+        resulting_attempt_revision: str | None = None,
+    ) -> InterventionRecord:
+        return cls(
+            command_id=request.command_id,
+            run_id=run_id,
+            actor=request.actor,
+            target_scope=target_scope,
+            target_id=target_id,
+            expected_run_revision=request.expected_run_revision,
+            kind=request.kind,
+            payload=request.model_dump(mode="json"),
+            requested_at=requested_at,
+            validation_outcome=validation_outcome,
+            validation_detail=validation_detail,
+            delivery_state=delivery_state,
+            deliveries=deliveries,
+            resulting_run_revision=resulting_run_revision,
+            resulting_attempt_revision=resulting_attempt_revision,
+        )
+
+
+class StageRedirect(FrozenModel):
+    schema_version: Literal[1] = 1
+    run_id: NonEmpty
+    stage_id: Identifier
+    recipient_profile_id: Identifier
+    command_id: UUID
+    updated_at: datetime
+
+
 class CommandOutcome(StrEnum):
     ACCEPTED = "accepted"
     REJECTED = "rejected"
@@ -241,6 +344,10 @@ class LedgerMutation(FrozenModel):
     reservations: tuple[ReservationChange, ...] = ()
     handoffs: tuple[Handoff, ...] = ()
     artifacts: tuple[ArtifactRegistration, ...] = ()
+    intervention_records: tuple[InterventionRecord, ...] = ()
+    stage_redirects: tuple[StageRedirect, ...] = ()
+    receipt_outcome: CommandOutcome = CommandOutcome.ACCEPTED
+    receipt_reason: str | None = None
 
     @model_validator(mode="after")
     def reject_duplicate_targets(self) -> LedgerMutation:
@@ -263,6 +370,12 @@ class LedgerMutation(FrozenModel):
         artifact_ids = [item.artifact.id for item in self.artifacts]
         if len(artifact_ids) != len(set(artifact_ids)):
             raise ValueError("a mutation can publish each artifact only once")
+        intervention_ids = [item.command_id for item in self.intervention_records]
+        if len(intervention_ids) != len(set(intervention_ids)):
+            raise ValueError("a mutation can update each intervention only once")
+        redirect_stages = [item.stage_id for item in self.stage_redirects]
+        if len(redirect_stages) != len(set(redirect_stages)):
+            raise ValueError("a mutation can update each stage redirect only once")
         return self
 
 

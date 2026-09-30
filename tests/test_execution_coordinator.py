@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
@@ -11,22 +12,34 @@ from orchestrator.backends.fake import (
     AttemptScript,
     FakeBackend,
     FakeClock,
+    ScriptedAck,
     ScriptedFailure,
 )
 from orchestrator.domain.backend import (
     ArtifactEntry,
     OutputStatus,
+    Reconciliation,
+    ShutdownReceipt,
     WorkerResult,
     WorkerTerminalEvent,
 )
 from orchestrator.domain.models import (
+    AttemptStatus,
     Effort,
     FailureClass,
+    InterventionKind,
     ModelBindingSettings,
+    PauseIntervention,
+    RedirectIntervention,
     ResolvedWorkflow,
+    ResumeIntervention,
+    RetryIntervention,
     RunOverrides,
     RunStatus,
     StageStatus,
+    SteerIntervention,
+    StopAttemptIntervention,
+    StopIntervention,
 )
 from orchestrator.execution import (
     ExecutionCoordinator,
@@ -36,6 +49,7 @@ from orchestrator.execution import (
 )
 from orchestrator.persistence import CoordinatorOwnership, SQLiteLedger
 from orchestrator.persistence.ledger import canonical_json, content_hash
+from orchestrator.persistence.models import CommandOutcome, ControlDeliveryStatus
 from orchestrator.resolution import resolve_run
 
 STAMP = datetime(2026, 9, 29, tzinfo=UTC)
@@ -773,3 +787,639 @@ async def test_claimed_launch_is_quarantined_after_coordinator_restart(
         assert new_backend.start_calls == []
     finally:
         new_ownership.release(STAMP)
+
+
+@pytest.mark.asyncio
+async def test_stale_control_is_persisted_as_rejected_and_pause_without_work_is_immediate(
+    app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "review", "pause-empty")
+    coordinator, _backend, _clock = _coordinator(ledger, ownership, factory=_worker_script)
+
+    stale = await coordinator.apply_intervention(
+        PauseIntervention(
+            command_id=uuid4(),
+            actor="user",
+            target="pause-empty",
+            expected_run_revision=9,
+            kind=InterventionKind.PAUSE,
+            run_id="pause-empty",
+        )
+    )
+    assert stale.outcome == CommandOutcome.REJECTED
+    assert "stale_revision" in (stale.reason or "")
+    stale_record = ledger.list_intervention_records("pause-empty")[-1]
+    assert stale_record.validation_outcome == "rejected"
+
+    run = ledger.get_run("pause-empty")
+    paused = await coordinator.apply_intervention(
+        PauseIntervention(
+            command_id=uuid4(),
+            actor="user",
+            target="pause-empty",
+            expected_run_revision=run.state.revision,
+            kind=InterventionKind.PAUSE,
+            run_id="pause-empty",
+        )
+    )
+    assert paused.outcome == CommandOutcome.ACCEPTED
+    assert ledger.get_run("pause-empty").state.status == RunStatus.PAUSED
+
+
+@pytest.mark.asyncio
+async def test_pause_drains_active_worker_and_resume_preserves_completed_work(
+    app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "review", "pause-active")
+    coordinator, backend, _clock = _coordinator(
+        ledger,
+        ownership,
+        factory=lambda spec: AttemptScript(
+            events=_worker_script(spec).events,
+            event_barrier=True,
+        ),
+        auto_release=False,
+    )
+    coordinator.advance("pause-active")
+    coordinator.advance("pause-active")
+    await coordinator.dispatch_pending("pause-active")
+    attempt = ledger.list_attempts("pause-active")[0]
+    await backend.wait_until_waiting(attempt.spec.attempt_id, 0)
+
+    paused = await coordinator.apply_intervention(
+        PauseIntervention(
+            command_id=uuid4(),
+            actor="user",
+            target="pause-active",
+            expected_run_revision=ledger.get_run("pause-active").state.revision,
+            kind=InterventionKind.PAUSE,
+            run_id="pause-active",
+        )
+    )
+    assert paused.outcome == CommandOutcome.ACCEPTED
+    assert ledger.get_run("pause-active").state.status == RunStatus.PAUSE_REQUESTED
+    assert len(ledger.list_attempts("pause-active")) == 1
+
+    backend.release_next(attempt.spec.attempt_id)
+    await coordinator.wait_for_workers()
+    assert ledger.get_run("pause-active").state.status == RunStatus.PAUSED
+    saved_result = ledger.get_attempt(attempt.spec.attempt_id).result
+    assert saved_result is not None and saved_result.result is not None
+
+    run = ledger.get_run("pause-active")
+    resumed = await coordinator.apply_intervention(
+        ResumeIntervention(
+            command_id=uuid4(),
+            actor="user",
+            target="pause-active",
+            expected_run_revision=run.state.revision,
+            kind=InterventionKind.RESUME,
+            run_id="pause-active",
+        )
+    )
+    assert resumed.outcome == CommandOutcome.ACCEPTED
+    assert await coordinator.run_until_stalled("pause-active") == RunStatus.SUCCEEDED
+    assert ledger.get_attempt(attempt.spec.attempt_id).result == saved_result
+
+
+@pytest.mark.asyncio
+async def test_stop_selected_attempt_retains_attention_until_run_stop(
+    app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "review", "stop-selected")
+    coordinator, backend, _clock = _coordinator(
+        ledger,
+        ownership,
+        factory=lambda spec: AttemptScript(
+            events=_worker_script(spec).events,
+            event_barrier=True,
+        ),
+        auto_release=False,
+    )
+    coordinator.advance("stop-selected")
+    coordinator.advance("stop-selected")
+    await coordinator.dispatch_pending("stop-selected")
+    attempt = ledger.list_attempts("stop-selected")[0]
+    await backend.wait_until_waiting(attempt.spec.attempt_id, 0)
+
+    stopped_attempt = await coordinator.apply_intervention(
+        StopAttemptIntervention(
+            command_id=uuid4(),
+            actor="user",
+            target=attempt.spec.attempt_id,
+            expected_run_revision=ledger.get_run("stop-selected").state.revision,
+            kind=InterventionKind.STOP_ATTEMPT,
+            run_id="stop-selected",
+            attempt_id=attempt.spec.attempt_id,
+        )
+    )
+    assert stopped_attempt.outcome == CommandOutcome.ACCEPTED
+    assert ledger.get_attempt(attempt.spec.attempt_id).state.status == AttemptStatus.CANCELLED
+    assert ledger.get_run("stop-selected").state.status == RunStatus.ATTENTION_REQUIRED
+    assert all(
+        item.status.value == "released" for item in ledger.list_reservations("stop-selected")
+    )
+    record = ledger.list_intervention_records("stop-selected")[-1]
+    assert record.delivery_state == ControlDeliveryStatus.ACKNOWLEDGED
+
+    run = ledger.get_run("stop-selected")
+    stopped = await coordinator.apply_intervention(
+        StopIntervention(
+            command_id=uuid4(),
+            actor="user",
+            target="stop-selected",
+            expected_run_revision=run.state.revision,
+            kind=InterventionKind.STOP,
+            run_id="stop-selected",
+        )
+    )
+    assert stopped.outcome == CommandOutcome.ACCEPTED
+    assert ledger.get_run("stop-selected").state.status == RunStatus.STOPPED
+    await coordinator.wait_for_workers()
+
+
+@pytest.mark.asyncio
+async def test_workflow_stop_interrupts_active_worker_and_stops_after_close(
+    app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "review", "stop-run")
+    coordinator, backend, _clock = _coordinator(
+        ledger,
+        ownership,
+        factory=lambda spec: AttemptScript(
+            events=_worker_script(spec).events,
+            event_barrier=True,
+        ),
+        auto_release=False,
+    )
+    coordinator.advance("stop-run")
+    coordinator.advance("stop-run")
+    await coordinator.dispatch_pending("stop-run")
+    attempt = ledger.list_attempts("stop-run")[0]
+    await backend.wait_until_waiting(attempt.spec.attempt_id, 0)
+
+    receipt = await coordinator.apply_intervention(
+        StopIntervention(
+            command_id=uuid4(),
+            actor="user",
+            target="stop-run",
+            expected_run_revision=ledger.get_run("stop-run").state.revision,
+            kind=InterventionKind.STOP,
+            run_id="stop-run",
+        )
+    )
+    assert receipt.outcome == CommandOutcome.ACCEPTED
+    assert ledger.get_attempt(attempt.spec.attempt_id).state.status == AttemptStatus.CANCELLED
+    assert ledger.get_run("stop-run").state.status == RunStatus.STOPPED
+    assert all(item.status.value == "released" for item in ledger.list_reservations("stop-run"))
+    await coordinator.wait_for_workers()
+
+
+@pytest.mark.asyncio
+async def test_unsupported_workflow_stop_retains_capacity_for_reconciliation(
+    app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "review", "stop-unsupported")
+    coordinator, backend, _clock = _coordinator(
+        ledger,
+        ownership,
+        factory=lambda spec: AttemptScript(
+            events=_worker_script(spec).events,
+            interrupt_acks=(
+                ScriptedAck(accepted=False, supported=False, reason="interrupt unavailable"),
+            ),
+            event_barrier=True,
+        ),
+        auto_release=False,
+    )
+    coordinator.advance("stop-unsupported")
+    coordinator.advance("stop-unsupported")
+    await coordinator.dispatch_pending("stop-unsupported")
+    attempt = ledger.list_attempts("stop-unsupported")[0]
+    await backend.wait_until_waiting(attempt.spec.attempt_id, 0)
+
+    await coordinator.apply_intervention(
+        StopIntervention(
+            command_id=uuid4(),
+            actor="user",
+            target="stop-unsupported",
+            expected_run_revision=ledger.get_run("stop-unsupported").state.revision,
+            kind=InterventionKind.STOP,
+            run_id="stop-unsupported",
+        )
+    )
+    assert ledger.get_run("stop-unsupported").state.status == RunStatus.ATTENTION_REQUIRED
+    assert ledger.get_attempt(attempt.spec.attempt_id).state.status == AttemptStatus.RUNNING
+    assert any(item.status.value == "held" for item in ledger.list_reservations("stop-unsupported"))
+    record = ledger.list_intervention_records("stop-unsupported")[-1]
+    assert record.delivery_state == ControlDeliveryStatus.UNSUPPORTED
+    backend.release_next(attempt.spec.attempt_id)
+    await coordinator.wait_for_workers()
+
+
+@pytest.mark.asyncio
+async def test_worker_completion_wins_race_with_pending_interrupt(app_config, ledger_owner) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "review", "stop-race")
+    coordinator, backend, _clock = _coordinator(
+        ledger,
+        ownership,
+        factory=lambda spec: AttemptScript(
+            events=_worker_script(spec).events,
+            interrupt_acks=(ScriptedAck(barrier=True),),
+            event_barrier=True,
+        ),
+        auto_release=False,
+    )
+    coordinator.advance("stop-race")
+    coordinator.advance("stop-race")
+    await coordinator.dispatch_pending("stop-race")
+    attempt = ledger.list_attempts("stop-race")[0]
+    await backend.wait_until_waiting(attempt.spec.attempt_id, 0)
+    run = ledger.get_run("stop-race")
+    stopping = asyncio.create_task(
+        coordinator.apply_intervention(
+            StopAttemptIntervention(
+                command_id=uuid4(),
+                actor="user",
+                target=attempt.spec.attempt_id,
+                expected_run_revision=run.state.revision,
+                kind=InterventionKind.STOP_ATTEMPT,
+                run_id="stop-race",
+                attempt_id=attempt.spec.attempt_id,
+            )
+        )
+    )
+    await backend.wait_until_control_waiting(attempt.spec.attempt_id, "interrupt")
+    backend.release_next(attempt.spec.attempt_id)
+    await coordinator.wait_for_workers()
+    backend.release_control(attempt.spec.attempt_id, "interrupt")
+    receipt = await stopping
+
+    assert receipt.outcome == CommandOutcome.ACCEPTED
+    assert ledger.get_attempt(attempt.spec.attempt_id).state.status == AttemptStatus.SUCCEEDED
+    assert ledger.get_run("stop-race").state.status == RunStatus.SUCCEEDED
+    record = next(
+        item
+        for item in ledger.list_intervention_records("stop-race")
+        if item.command_id == receipt.command_id
+    )
+    assert record.delivery_state == ControlDeliveryStatus.REJECTED
+
+
+@pytest.mark.asyncio
+async def test_timeout_uses_persisted_interrupt_and_bounded_close(app_config, ledger_owner) -> None:
+    ledger, ownership = ledger_owner
+    workflow = next(item for item in app_config.workflows if item.id == "review")
+    profile_id = next(item.default_profile for item in workflow.stages if item.id == "review")
+    agents = app_config.agents.model_copy(
+        update={
+            "agents": [
+                agent.model_copy(update={"timeout_seconds": 1}) if agent.id == profile_id else agent
+                for agent in app_config.agents.agents
+            ]
+        }
+    )
+    _create_run(ledger, replace(app_config, agents=agents), "review", "timeout-run")
+    coordinator, backend, clock = _coordinator(
+        ledger,
+        ownership,
+        factory=lambda spec: AttemptScript(
+            events=_worker_script(spec).events,
+            event_barrier=True,
+        ),
+        auto_release=False,
+    )
+    running = asyncio.create_task(coordinator.run_until_stalled("timeout-run"))
+    attempt_id = await backend.wait_until_started_stage("review")
+    await backend.wait_until_waiting(attempt_id, 0)
+    clock.advance(1)
+
+    assert await running == RunStatus.FAILED
+    attempt = ledger.get_attempt(attempt_id)
+    assert attempt.state.status == AttemptStatus.TIMED_OUT
+    assert ledger.get_run("timeout-run").state.status == RunStatus.FAILED
+    assert any(
+        event.kind.value == "timeout_detected" for event in ledger.list_events("timeout-run")
+    )
+    intervention = ledger.list_intervention_records("timeout-run")[-1]
+    assert intervention.kind == InterventionKind.STOP_ATTEMPT
+    assert intervention.delivery_state == ControlDeliveryStatus.ACKNOWLEDGED
+
+
+@pytest.mark.asyncio
+async def test_timeout_with_unsettled_close_keeps_unknown_attempt_capacity(
+    app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    workflow = next(item for item in app_config.workflows if item.id == "review")
+    profile_id = next(item.default_profile for item in workflow.stages if item.id == "review")
+    agents = app_config.agents.model_copy(
+        update={
+            "agents": [
+                agent.model_copy(update={"timeout_seconds": 1}) if agent.id == profile_id else agent
+                for agent in app_config.agents.agents
+            ]
+        }
+    )
+    _create_run(ledger, replace(app_config, agents=agents), "review", "timeout-unknown")
+    coordinator, backend, clock = _coordinator(
+        ledger,
+        ownership,
+        factory=lambda spec: AttemptScript(
+            events=_worker_script(spec).events,
+            close_receipts=(ShutdownReceipt(settled=False, detail="still running"),),
+            reconciliations=(Reconciliation(known=False, detail="ownership unavailable"),),
+            event_barrier=True,
+        ),
+        auto_release=False,
+    )
+    running = asyncio.create_task(coordinator.run_until_stalled("timeout-unknown"))
+    attempt_id = await backend.wait_until_started_stage("review")
+    await backend.wait_until_waiting(attempt_id, 0)
+    clock.advance(1)
+
+    assert await running == RunStatus.ATTENTION_REQUIRED
+    assert ledger.get_attempt(attempt_id).state.status == AttemptStatus.OUTCOME_UNKNOWN
+    assert any(item.status.value == "held" for item in ledger.list_reservations("timeout-unknown"))
+    assert ledger.list_intervention_records("timeout-unknown")[-1].delivery_state == (
+        ControlDeliveryStatus.UNKNOWN
+    )
+
+
+@pytest.mark.asyncio
+async def test_steer_acknowledgement_changes_effective_input_revision(
+    app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "review", "steer-run")
+
+    def factory(spec):
+        event = _worker_script(spec).events[0]
+        result = event.result.model_copy(update={"input_revision": "effective"})
+        return AttemptScript(
+            events=(event.model_copy(update={"result": result}),),
+            event_barrier=True,
+        )
+
+    coordinator, backend, _clock = _coordinator(
+        ledger, ownership, factory=factory, auto_release=False
+    )
+    coordinator.advance("steer-run")
+    coordinator.advance("steer-run")
+    await coordinator.dispatch_pending("steer-run")
+    attempt = ledger.list_attempts("steer-run")[0]
+    await backend.wait_until_waiting(attempt.spec.attempt_id, 0)
+    original_revision = attempt.state.effective_input_revision
+
+    receipt = await coordinator.apply_intervention(
+        SteerIntervention(
+            command_id=uuid4(),
+            actor="user",
+            target=attempt.spec.attempt_id,
+            expected_run_revision=ledger.get_run("steer-run").state.revision,
+            kind=InterventionKind.STEER,
+            run_id="steer-run",
+            attempt_id=attempt.spec.attempt_id,
+            expected_turn_id=attempt.state.worker_turn_id,
+            instruction="Prioritize security findings",
+        )
+    )
+    assert receipt.outcome == CommandOutcome.ACCEPTED
+    updated = ledger.get_attempt(attempt.spec.attempt_id)
+    assert updated.state.effective_input_revision != original_revision
+    assert updated.state.input_revision_uncertain is False
+    assert ledger.list_intervention_records("steer-run")[-1].delivery_state == (
+        ControlDeliveryStatus.ACKNOWLEDGED
+    )
+
+    backend.release_next(attempt.spec.attempt_id)
+    await coordinator.wait_for_workers()
+    assert ledger.get_attempt(attempt.spec.attempt_id).state.status == AttemptStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_result_from_pre_steer_input_cannot_satisfy_completion(
+    app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "review", "steer-stale-result")
+
+    def factory(spec):
+        event = _worker_script(spec).events[0]
+        result = event.result.model_copy(update={"input_revision": "effective"})
+        return AttemptScript(
+            events=(event.model_copy(update={"result": result}),),
+            steer_acks=(ScriptedAck(consumed=False),),
+            event_barrier=True,
+        )
+
+    coordinator, backend, _clock = _coordinator(
+        ledger, ownership, factory=factory, auto_release=False
+    )
+    coordinator.advance("steer-stale-result")
+    coordinator.advance("steer-stale-result")
+    await coordinator.dispatch_pending("steer-stale-result")
+    attempt = ledger.list_attempts("steer-stale-result")[0]
+    await backend.wait_until_waiting(attempt.spec.attempt_id, 0)
+    await coordinator.apply_intervention(
+        SteerIntervention(
+            command_id=uuid4(),
+            actor="user",
+            target=attempt.spec.attempt_id,
+            expected_run_revision=ledger.get_run("steer-stale-result").state.revision,
+            kind=InterventionKind.STEER,
+            run_id="steer-stale-result",
+            attempt_id=attempt.spec.attempt_id,
+            expected_turn_id=attempt.state.worker_turn_id,
+            instruction="Prioritize security findings",
+        )
+    )
+    backend.release_next(attempt.spec.attempt_id)
+    await coordinator.wait_for_workers()
+    assert ledger.get_attempt(attempt.spec.attempt_id).state.error_class == (
+        FailureClass.INVALID_OUTPUT
+    )
+    coordinator.advance("steer-stale-result")
+    assert ledger.get_run("steer-stale-result").state.status == RunStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_restart_recovery_settles_known_terminal_and_retains_unknown_capacity(
+    tmp_path, app_config, ledger_owner
+) -> None:
+    ledger, old_ownership = ledger_owner
+
+    def known_terminal_script(spec):
+        event = _worker_script(spec).events[0]
+        return AttemptScript(
+            events=(event,),
+            reconciliations=(
+                Reconciliation(
+                    known=True,
+                    status=AttemptStatus.SUCCEEDED,
+                    terminal_result=event.result,
+                ),
+            ),
+            event_barrier=True,
+        )
+
+    _create_run(ledger, app_config, "review", "recovery-known")
+    original, backend, clock = _coordinator(
+        ledger, old_ownership, factory=known_terminal_script, auto_release=False
+    )
+    original.advance("recovery-known")
+    original.advance("recovery-known")
+    await original.dispatch_pending("recovery-known")
+    attempt = ledger.list_attempts("recovery-known")[0]
+    await backend.wait_until_waiting(attempt.spec.attempt_id, 0)
+
+    restarted = ExecutionCoordinator(ledger, backend, old_ownership, clock=clock)
+    assert await restarted.recover("recovery-known") == 1
+    assert ledger.get_attempt(attempt.spec.attempt_id).state.status == AttemptStatus.SUCCEEDED
+    assert all(
+        item.status.value == "released" for item in ledger.list_reservations("recovery-known")
+    )
+    await original.wait_for_workers()
+
+    _create_run(ledger, app_config, "review", "recovery-unknown")
+
+    def unknown_script(spec):
+        return AttemptScript(
+            events=_worker_script(spec).events,
+            reconciliations=(Reconciliation(known=False, detail="no terminal evidence"),),
+            event_barrier=True,
+        )
+
+    uncertain, unknown_backend, unknown_clock = _coordinator(
+        ledger, old_ownership, factory=unknown_script, auto_release=False
+    )
+    uncertain.advance("recovery-unknown")
+    uncertain.advance("recovery-unknown")
+    await uncertain.dispatch_pending("recovery-unknown")
+    unknown_attempt = ledger.list_attempts("recovery-unknown")[0]
+    await unknown_backend.wait_until_waiting(unknown_attempt.spec.attempt_id, 0)
+    restarted_unknown = ExecutionCoordinator(
+        ledger, unknown_backend, old_ownership, clock=unknown_clock
+    )
+    await restarted_unknown.recover("recovery-unknown")
+    assert ledger.get_attempt(unknown_attempt.spec.attempt_id).state.status == (
+        AttemptStatus.OUTCOME_UNKNOWN
+    )
+    assert ledger.get_run("recovery-unknown").state.status == RunStatus.ATTENTION_REQUIRED
+    assert any(item.status.value == "held" for item in ledger.list_reservations("recovery-unknown"))
+    handle = uncertain._worker_handle(ledger.get_attempt(unknown_attempt.spec.attempt_id))
+    assert handle is not None
+    assert (await unknown_backend.close(handle)).settled
+    await uncertain.wait_for_workers()
+
+
+@pytest.mark.asyncio
+async def test_allowed_redirect_is_persisted_and_used_for_the_next_handoff(
+    app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "prototype", "redirect-run")
+    coordinator, _backend, _clock = _coordinator(ledger, ownership, factory=_worker_script)
+
+    receipt = await coordinator.apply_intervention(
+        RedirectIntervention(
+            command_id=uuid4(),
+            actor="user",
+            target="implement",
+            expected_run_revision=ledger.get_run("redirect-run").state.revision,
+            kind=InterventionKind.REDIRECT,
+            run_id="redirect-run",
+            stage_id="implement",
+            recipient_profile_id="implementer",
+        )
+    )
+    assert receipt.outcome == CommandOutcome.ACCEPTED
+    assert ledger.get_stage_redirect("redirect-run", "implement") == "implementer"
+    assert await coordinator.run_until_stalled("redirect-run") == RunStatus.SUCCEEDED
+    implement = ledger.list_attempts("redirect-run", "implement")
+    assert len(implement) == 1
+    assert implement[0].spec.profile_id == "implementer"
+
+
+@pytest.mark.asyncio
+async def test_retry_after_known_selected_stop_creates_child_attempt(
+    app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    workflow = next(item for item in app_config.workflows if item.id == "review")
+    profile_id = next(item.default_profile for item in workflow.stages if item.id == "review")
+    agents = app_config.agents.model_copy(
+        update={
+            "agents": [
+                agent.model_copy(
+                    update={
+                        "retry_policy": agent.retry_policy.model_copy(
+                            update={
+                                "max_attempts": 2,
+                                "recoverable_classes": (FailureClass.CANCELLED,),
+                            }
+                        )
+                    }
+                )
+                if agent.id == profile_id
+                else agent
+                for agent in app_config.agents.agents
+            ]
+        }
+    )
+    adjusted_config = replace(app_config, agents=agents)
+    _create_run(ledger, adjusted_config, "review", "retry-run")
+    coordinator, backend, _clock = _coordinator(
+        ledger,
+        ownership,
+        factory=lambda spec: AttemptScript(
+            events=_worker_script(spec).events,
+            event_barrier=True,
+        ),
+        auto_release=False,
+    )
+    coordinator.advance("retry-run")
+    coordinator.advance("retry-run")
+    await coordinator.dispatch_pending("retry-run")
+    prior = ledger.list_attempts("retry-run")[0]
+    await backend.wait_until_waiting(prior.spec.attempt_id, 0)
+    stopped = await coordinator.apply_intervention(
+        StopAttemptIntervention(
+            command_id=uuid4(),
+            actor="user",
+            target=prior.spec.attempt_id,
+            expected_run_revision=ledger.get_run("retry-run").state.revision,
+            kind=InterventionKind.STOP_ATTEMPT,
+            run_id="retry-run",
+            attempt_id=prior.spec.attempt_id,
+        )
+    )
+    assert stopped.outcome == CommandOutcome.ACCEPTED
+    assert ledger.get_attempt(prior.spec.attempt_id).state.safe_to_retry
+
+    run = ledger.get_run("retry-run")
+    retry = await coordinator.apply_intervention(
+        RetryIntervention(
+            command_id=uuid4(),
+            actor="user",
+            target=prior.spec.attempt_id,
+            expected_run_revision=run.state.revision,
+            kind=InterventionKind.RETRY,
+            run_id="retry-run",
+            attempt_id=prior.spec.attempt_id,
+        )
+    )
+    assert retry.outcome == CommandOutcome.ACCEPTED
+    attempts = ledger.list_attempts("retry-run", "review")
+    assert len(attempts) == 2
+    child = next(item for item in attempts if item.spec.attempt_id != prior.spec.attempt_id)
+    assert child.spec.parent_attempt_id == prior.spec.attempt_id
+    assert child.spec.attempt_id != prior.spec.attempt_id
+    assert child.state.status == AttemptStatus.LAUNCHING
+    await coordinator.wait_for_workers()

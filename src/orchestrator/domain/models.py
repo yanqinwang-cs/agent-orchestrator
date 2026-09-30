@@ -607,6 +607,8 @@ class RunState(StrictModel):
     active_stages: list[Identifier] = Field(default_factory=list)
     attempts_used: int = Field(default=0, ge=0)
     elapsed_seconds: float = Field(default=0, ge=0)
+    attention_reason: str | None = None
+    resume_status: RunStatus | None = None
 
 
 class AttemptState(StrictModel):
@@ -620,6 +622,15 @@ class AttemptState(StrictModel):
     error_class: FailureClass | None = None
     error_summary: str | None = None
     safe_to_retry: bool = False
+    retry_authorized: bool = False
+    effective_input_revision: str | None = None
+    input_revision_uncertain: bool = False
+    worker_handle_id: str | None = None
+    worker_backend_version: str | None = None
+    worker_session_id: str | None = None
+    worker_thread_id: str | None = None
+    worker_turn_id: str | None = None
+    worker_lifecycle_owner_id: str | None = None
 
 
 class Artifact(FrozenModel):
@@ -655,12 +666,20 @@ class InterventionKind(StrEnum):
     REDIRECT = "redirect"
 
 
+class InterventionTargetScope(StrEnum):
+    RUN = "run"
+    STAGE = "stage"
+    ATTEMPT = "attempt"
+
+
 class InterventionBase(FrozenModel):
     schema_version: Literal[1] = 1
     command_id: UUID
     actor: NonEmpty
     target: NonEmpty
     expected_run_revision: int = Field(ge=0)
+    run_id: NonEmpty | None = None
+    target_scope: InterventionTargetScope | None = None
 
 
 class PauseIntervention(InterventionBase):
@@ -678,6 +697,7 @@ class StopIntervention(InterventionBase):
 class StopAttemptIntervention(InterventionBase):
     kind: Literal[InterventionKind.STOP_ATTEMPT]
     attempt_id: NonEmpty
+    reason: Literal["user", "timeout"] = "user"
 
 
 class SteerIntervention(InterventionBase):
@@ -717,6 +737,18 @@ class EventKind(StrEnum):
     ATTEMPT_RESULT_RECORDED = "attempt_result_recorded"
     INTERVENTION_REQUESTED = "intervention_requested"
     INTERVENTION_DELIVERED = "intervention_delivered"
+    INTERVENTION_VALIDATED = "intervention_validated"
+    INTERVENTION_REJECTED = "intervention_rejected"
+    INTERVENTION_DELIVERY_ATTEMPTED = "intervention_delivery_attempted"
+    INTERVENTION_DELIVERY_ACKNOWLEDGED = "intervention_delivery_acknowledged"
+    INTERVENTION_DELIVERY_UNSUPPORTED = "intervention_delivery_unsupported"
+    INTERVENTION_DELIVERY_FAILED = "intervention_delivery_failed"
+    INTERVENTION_DELIVERY_UNKNOWN = "intervention_delivery_unknown"
+    INTERVENTION_STATE_CHANGED = "intervention_state_changed"
+    RECONCILIATION_REQUESTED = "reconciliation_requested"
+    RECONCILIATION_RESOLVED = "reconciliation_resolved"
+    RECONCILIATION_UNRESOLVED = "reconciliation_unresolved"
+    TIMEOUT_DETECTED = "timeout_detected"
     OUTBOX_STATUS_CHANGED = "outbox_status_changed"
     RESERVATION_STATUS_CHANGED = "reservation_status_changed"
     ARTIFACT_RECORDED = "artifact_recorded"
@@ -778,6 +810,35 @@ class InterventionDeliveredEvent(EventBase):
     result: str | None = None
 
 
+class InterventionLifecycleEvent(EventBase):
+    kind: Literal[
+        EventKind.INTERVENTION_VALIDATED,
+        EventKind.INTERVENTION_REJECTED,
+        EventKind.INTERVENTION_DELIVERY_ATTEMPTED,
+        EventKind.INTERVENTION_DELIVERY_ACKNOWLEDGED,
+        EventKind.INTERVENTION_DELIVERY_UNSUPPORTED,
+        EventKind.INTERVENTION_DELIVERY_FAILED,
+        EventKind.INTERVENTION_DELIVERY_UNKNOWN,
+        EventKind.INTERVENTION_STATE_CHANGED,
+        EventKind.RECONCILIATION_REQUESTED,
+        EventKind.RECONCILIATION_RESOLVED,
+        EventKind.RECONCILIATION_UNRESOLVED,
+    ]
+    command_id: UUID
+    attempt_id: NonEmpty | None = None
+    action_id: UUID | None = None
+    detail: str | None = None
+    resulting_run_revision: int | None = Field(default=None, ge=0)
+    reconciled_status: AttemptStatus | None = None
+    reconciliation_known: bool | None = None
+
+
+class TimeoutDetectedEvent(EventBase):
+    kind: Literal[EventKind.TIMEOUT_DETECTED]
+    attempt_id: NonEmpty
+    timeout_seconds: int = Field(ge=1)
+
+
 class OutboxStatusChangedEvent(EventBase):
     kind: Literal[EventKind.OUTBOX_STATUS_CHANGED]
     action_id: UUID
@@ -814,6 +875,8 @@ type Event = Annotated[
     | AttemptResultRecordedEvent
     | InterventionRequestedEvent
     | InterventionDeliveredEvent
+    | InterventionLifecycleEvent
+    | TimeoutDetectedEvent
     | OutboxStatusChangedEvent
     | ReservationStatusChangedEvent
     | ArtifactRecordedEvent

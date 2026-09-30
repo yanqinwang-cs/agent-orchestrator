@@ -54,6 +54,7 @@ from orchestrator.persistence.models import (
     AttemptResultRegistration,
     CommandOutcome,
     CommandReceipt,
+    InterventionRecord,
     LedgerMutation,
     OutboxAction,
     OutboxIntent,
@@ -65,6 +66,7 @@ from orchestrator.persistence.models import (
     ReservationOperation,
     ReservationRecord,
     StageProjection,
+    StageRedirect,
     StageResult,
 )
 
@@ -377,12 +379,15 @@ class SQLiteLedger:
                 active_stages=[],
                 attempts_used=0,
                 elapsed_seconds=0,
+                attention_reason=None,
+                resume_status=None,
             )
             connection.execute(
                 "INSERT INTO runs(run_id, project_id, settings_revision, snapshot_hash, "
                 "status, revision, "
-                "active_stages, attempts_used, elapsed_seconds, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "active_stages, attempts_used, elapsed_seconds, attention_reason, resume_status, "
+                "created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     run_id,
                     project_config.id,
@@ -393,6 +398,8 @@ class SQLiteLedger:
                     canonical_json(initial_state.active_stages),
                     initial_state.attempts_used,
                     initial_state.elapsed_seconds,
+                    initial_state.attention_reason,
+                    initial_state.resume_status.value if initial_state.resume_status else None,
                     _iso(now),
                     _iso(now),
                 ),
@@ -449,6 +456,8 @@ class SQLiteLedger:
                 active_stages=json.loads(row["active_stages"]),
                 attempts_used=row["attempts_used"],
                 elapsed_seconds=row["elapsed_seconds"],
+                attention_reason=row["attention_reason"],
+                resume_status=(RunStatus(row["resume_status"]) if row["resume_status"] else None),
             )
             projection_rows = connection.execute(
                 "SELECT stage_id, status, updated_at, result_payload FROM stages WHERE run_id = ?",
@@ -595,7 +604,7 @@ class SQLiteLedger:
             )
 
             run_changes = (
-                mutation.run_update.model_dump(exclude_none=True) if mutation.run_update else {}
+                mutation.run_update.model_dump(exclude_unset=True) if mutation.run_update else {}
             )
             state_data = current_state.model_dump(mode="python")
             state_data.update(run_changes)
@@ -618,13 +627,16 @@ class SQLiteLedger:
 
             connection.execute(
                 "UPDATE runs SET status = ?, revision = ?, active_stages = ?, attempts_used = ?, "
-                "elapsed_seconds = ?, updated_at = ? WHERE run_id = ?",
+                "elapsed_seconds = ?, attention_reason = ?, resume_status = ?, updated_at = ? "
+                "WHERE run_id = ?",
                 (
                     current_state.status.value,
                     current_state.revision,
                     canonical_json(current_state.active_stages),
                     current_state.attempts_used,
                     current_state.elapsed_seconds,
+                    current_state.attention_reason,
+                    current_state.resume_status.value if current_state.resume_status else None,
                     _iso(mutation.occurred_at),
                     mutation.run_id,
                 ),
@@ -670,6 +682,11 @@ class SQLiteLedger:
                         )
                     )
             for outcome in mutation.outbox_outcomes:
+                row = connection.execute(
+                    "SELECT status FROM outbox_actions WHERE action_id = ? AND run_id = ?",
+                    (str(outcome.action_id), mutation.run_id),
+                ).fetchone()
+                previous_status = OutboxStatus(row["status"]) if row is not None else None
                 changed = self._apply_outbox_outcome(connection, mutation, outcome)
                 if changed and not self._has_matching_outbox_event(
                     mutation.events, outcome.action_id, outcome.status
@@ -682,7 +699,7 @@ class SQLiteLedger:
                             actor=mutation.actor,
                             kind=EventKind.OUTBOX_STATUS_CHANGED,
                             action_id=outcome.action_id,
-                            previous=OutboxStatus.CLAIMED,
+                            previous=previous_status,
                             current=outcome.status,
                             result=outcome.result,
                         )
@@ -752,6 +769,11 @@ class SQLiteLedger:
                             handoff=handoff,
                         )
                     )
+
+            for record in mutation.intervention_records:
+                self._upsert_intervention_record(connection, record)
+            for redirect in mutation.stage_redirects:
+                self._upsert_stage_redirect(connection, redirect)
             for event in mutation.events:
                 if isinstance(event, HandoffRecordedEvent):
                     self._insert_handoff(
@@ -765,9 +787,10 @@ class SQLiteLedger:
                 command_id=mutation.command_id,
                 run_id=mutation.run_id,
                 expected_revision=mutation.expected_revision,
-                outcome=CommandOutcome.ACCEPTED,
+                outcome=mutation.receipt_outcome,
                 resulting_revision=current_state.revision,
                 event_sequences=tuple(event_sequences),
+                reason=mutation.receipt_reason,
                 created_at=mutation.occurred_at,
             )
             self._save_receipt(connection, request_hash, receipt)
@@ -977,7 +1000,9 @@ class SQLiteLedger:
         previous = OutboxStatus(row["status"])
         if previous == change.status:
             return False
-        if previous != OutboxStatus.CLAIMED:
+        if previous != OutboxStatus.CLAIMED and not (
+            previous == OutboxStatus.PENDING and change.status == OutboxStatus.REJECTED
+        ):
             raise OutboxTransitionError(
                 f"cannot move outbox action {change.action_id} from {previous.value} "
                 f"to {change.status.value}"
@@ -1326,6 +1351,67 @@ class SQLiteLedger:
             appended.append(sequence)
         return tuple(appended)
 
+    def _upsert_intervention_record(
+        self, connection: sqlite3.Connection, record: InterventionRecord
+    ) -> None:
+        existing = connection.execute(
+            "SELECT payload FROM intervention_records WHERE command_id = ?",
+            (str(record.command_id),),
+        ).fetchone()
+        payload = canonical_json(record)
+        if existing is None:
+            connection.execute(
+                "INSERT INTO intervention_records(command_id, run_id, schema_version, payload, "
+                "updated_at) VALUES (?, ?, ?, ?, ?)",
+                (
+                    str(record.command_id),
+                    record.run_id,
+                    record.schema_version,
+                    payload,
+                    _iso(record.requested_at),
+                ),
+            )
+            return
+        prior = InterventionRecord.model_validate(json.loads(existing["payload"]))
+        if (
+            prior.run_id != record.run_id
+            or prior.actor != record.actor
+            or prior.payload != record.payload
+            or prior.expected_run_revision != record.expected_run_revision
+            or prior.requested_at != record.requested_at
+        ):
+            raise CommandIdConflict(
+                f"intervention ID {record.command_id} was reused for another request"
+            )
+        connection.execute(
+            "UPDATE intervention_records SET payload = ?, updated_at = ? WHERE command_id = ?",
+            (payload, _iso(record.requested_at), str(record.command_id)),
+        )
+
+    def _upsert_stage_redirect(
+        self, connection: sqlite3.Connection, redirect: StageRedirect
+    ) -> None:
+        stage = connection.execute(
+            "SELECT 1 FROM stages WHERE run_id = ? AND stage_id = ?",
+            (redirect.run_id, redirect.stage_id),
+        ).fetchone()
+        if stage is None:
+            raise LedgerInvariantError("redirect references a stage outside its run")
+        connection.execute(
+            "INSERT INTO stage_redirects(run_id, stage_id, recipient_profile_id, command_id, "
+            "updated_at) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(run_id, stage_id) DO UPDATE SET "
+            "recipient_profile_id = excluded.recipient_profile_id, "
+            "command_id = excluded.command_id, updated_at = excluded.updated_at",
+            (
+                redirect.run_id,
+                redirect.stage_id,
+                redirect.recipient_profile_id,
+                str(redirect.command_id),
+                _iso(redirect.updated_at),
+            ),
+        )
+
     def _state_from_row(self, row: sqlite3.Row) -> RunState:
         return RunState(
             run_id=row["run_id"],
@@ -1334,6 +1420,8 @@ class SQLiteLedger:
             active_stages=json.loads(row["active_stages"]),
             attempts_used=row["attempts_used"],
             elapsed_seconds=row["elapsed_seconds"],
+            attention_reason=row["attention_reason"],
+            resume_status=RunStatus(row["resume_status"]) if row["resume_status"] else None,
         )
 
     def _save_receipt(
@@ -1381,6 +1469,8 @@ class SQLiteLedger:
             or mutation.reservations
             or mutation.handoffs
             or mutation.artifacts
+            or mutation.intervention_records
+            or mutation.stage_redirects
         ):
             return False
         for change in mutation.outbox_outcomes:
@@ -1450,6 +1540,26 @@ class SQLiteLedger:
                 (run_id,),
             ).fetchall()
             return tuple(adapter.validate_python(json.loads(row["payload"])) for row in rows)
+
+    def list_intervention_records(self, run_id: str) -> tuple[InterventionRecord, ...]:
+        with self._read_transaction() as connection:
+            rows = connection.execute(
+                "SELECT payload FROM intervention_records WHERE run_id = ? "
+                "ORDER BY updated_at, command_id",
+                (run_id,),
+            ).fetchall()
+            return tuple(
+                InterventionRecord.model_validate(json.loads(row["payload"])) for row in rows
+            )
+
+    def get_stage_redirect(self, run_id: str, stage_id: str) -> str | None:
+        with self._read_transaction() as connection:
+            row = connection.execute(
+                "SELECT recipient_profile_id FROM stage_redirects "
+                "WHERE run_id = ? AND stage_id = ?",
+                (run_id, stage_id),
+            ).fetchone()
+            return row["recipient_profile_id"] if row is not None else None
 
     def list_handoffs(self, run_id: str) -> tuple[Handoff, ...]:
         with self._read_transaction() as connection:

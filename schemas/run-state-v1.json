@@ -34,11 +34,34 @@
       "title": "Attempts Used",
       "type": "integer"
     },
+    "attention_reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Attention Reason"
+    },
     "elapsed_seconds": {
       "default": 0,
       "minimum": 0,
       "title": "Elapsed Seconds",
       "type": "number"
+    },
+    "resume_status": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RunStatus"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "revision": {
       "minimum": 0,

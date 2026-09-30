@@ -7,7 +7,7 @@ from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from orchestrator.domain.models import (
     AttemptStatus,
@@ -93,10 +93,12 @@ class WorkerHandle(FrozenModel):
 
 class WorkerIdentity(FrozenModel):
     backend: Identifier
+    backend_version: NonEmpty | None = None
     attempt_id: NonEmpty
     session_id: str | None = None
     thread_id: str | None = None
     turn_id: str | None = None
+    lifecycle_owner_id: NonEmpty | None = None
 
 
 class SteerCommand(FrozenModel):
@@ -104,11 +106,13 @@ class SteerCommand(FrozenModel):
     attempt_id: NonEmpty
     expected_turn_id: str | None = None
     instruction: NonEmpty
+    effective_input_revision: str | None = None
 
 
 class ControlAck(FrozenModel):
     command_id: UUID
     accepted: bool
+    supported: bool = True
     reason: str | None = None
 
 
@@ -116,7 +120,18 @@ class Reconciliation(FrozenModel):
     known: bool
     status: AttemptStatus | None = None
     terminal_result: WorkerResult | None = None
+    failure_class: FailureClass | None = None
+    safe_to_retry: bool = False
+    effective_input_revision: str | None = None
     detail: str | None = None
+
+    @model_validator(mode="after")
+    def require_known_status(self) -> Reconciliation:
+        if self.known != (self.status is not None):
+            raise ValueError("known reconciliation must include status and unknown must omit it")
+        if self.terminal_result is not None and self.status != AttemptStatus.SUCCEEDED:
+            raise ValueError("terminal result is valid only for a succeeded attempt")
+        return self
 
 
 class ShutdownReceipt(FrozenModel):

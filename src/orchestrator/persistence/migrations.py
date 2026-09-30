@@ -245,9 +245,31 @@ def _create_v2(connection: sqlite3.Connection) -> None:
     )
 
 
+def _create_v3(connection: sqlite3.Connection) -> None:
+    connection.execute("ALTER TABLE runs ADD COLUMN attention_reason TEXT")
+    connection.execute("ALTER TABLE runs ADD COLUMN resume_status TEXT")
+    connection.execute(
+        "CREATE TABLE intervention_records ("
+        "command_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, schema_version INTEGER NOT NULL, "
+        "payload TEXT NOT NULL, updated_at TEXT NOT NULL, "
+        "FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE)"
+    )
+    connection.execute(
+        "CREATE INDEX intervention_records_run_order "
+        "ON intervention_records(run_id, updated_at, command_id)"
+    )
+    connection.execute(
+        "CREATE TABLE stage_redirects ("
+        "run_id TEXT NOT NULL, stage_id TEXT NOT NULL, recipient_profile_id TEXT NOT NULL, "
+        "command_id TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (run_id, stage_id), "
+        "FOREIGN KEY (run_id, stage_id) REFERENCES stages(run_id, stage_id) ON DELETE CASCADE)"
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     (1, "durable-run-ledger", _create_v1),
     (2, "persist-worker-results-and-stage-outputs", _create_v2),
+    (3, "persist-control-lifecycle-and-run-attention", _create_v3),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1][0]
 

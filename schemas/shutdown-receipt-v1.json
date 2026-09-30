@@ -1,0 +1,26 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "detail": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Detail"
+    },
+    "settled": {
+      "title": "Settled",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "settled"
+  ],
+  "title": "ShutdownReceipt",
+  "type": "object"
+}

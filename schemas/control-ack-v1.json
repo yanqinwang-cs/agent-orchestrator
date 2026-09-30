@@ -1,0 +1,37 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "accepted": {
+      "title": "Accepted",
+      "type": "boolean"
+    },
+    "command_id": {
+      "format": "uuid",
+      "title": "Command Id",
+      "type": "string"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason"
+    },
+    "supported": {
+      "default": true,
+      "title": "Supported",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "command_id",
+    "accepted"
+  ],
+  "title": "ControlAck",
+  "type": "object"
+}

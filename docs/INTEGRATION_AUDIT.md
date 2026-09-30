@@ -4,7 +4,7 @@ Checked 28 September 2026. This is a source and configuration audit; **no live m
 
 ## First real harness backend: Codex
 
-Codex is the planned first real worker backend because it fits the user's existing subscription-backed workflow. Keep it behind the provider-neutral `WorkerBackend`; do not make Codex types part of the domain contract. Through milestone 3, this repository implements only the scripted fake backend. The settings below record the SDK target selected for the adapter; they do not claim that the adapter is implemented.
+Codex is the planned first real worker backend because it fits the user's existing subscription-backed workflow. Keep it behind the provider-neutral `WorkerBackend`; do not make Codex types part of the domain contract. Through milestone 4, this repository implements only the scripted fake backend and its deterministic control/recovery behavior. The settings below record the SDK target selected for the adapter; they do not claim that the adapter is implemented.
 
 Use the **official Python SDK, `openai-codex==0.147.0`**, behind `WorkerBackend`. The inspected PyPI distribution depends on `openai-codex-cli-bin==0.147.0`; use that matched pair initially. The locally installed standalone CLI is 0.154.0 and is a different compatibility target. Do not silently substitute it for the SDK's bundled binary. [PyPI metadata](https://pypi.org/pypi/openai-codex/json).
 

@@ -97,10 +97,10 @@ def test_database_is_versioned_and_survives_reopen(tmp_path) -> None:
     path = tmp_path / "orchestrator.sqlite3"
 
     with SQLiteLedger(path) as ledger:
-        assert ledger.schema_version == 2
+        assert ledger.schema_version == 3
 
     with SQLiteLedger(path) as reopened:
-        assert reopened.schema_version == 2
+        assert reopened.schema_version == 3
 
 
 def test_database_rejects_a_schema_newer_than_this_application(tmp_path) -> None:
@@ -112,7 +112,7 @@ def test_database_rejects_a_schema_newer_than_this_application(tmp_path) -> None
         SQLiteLedger(path)
 
 
-def test_v1_database_receives_additive_stage_and_attempt_result_migration(tmp_path) -> None:
+def test_v1_database_receives_additive_result_and_control_migrations(tmp_path) -> None:
     from orchestrator.persistence.migrations import MIGRATIONS
 
     path = tmp_path / "legacy.sqlite3"
@@ -125,7 +125,7 @@ def test_v1_database_receives_additive_stage_and_attempt_result_migration(tmp_pa
         connection.execute("PRAGMA user_version = 1")
 
     with SQLiteLedger(path) as ledger:
-        assert ledger.schema_version == 2
+        assert ledger.schema_version == 3
     with sqlite3.connect(path) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(stages)").fetchall()}
         assert "result_payload" in columns
@@ -135,6 +135,19 @@ def test_v1_database_receives_additive_stage_and_attempt_result_migration(tmp_pa
             ).fetchone()
             is not None
         )
+        assert {
+            "attention_reason",
+            "resume_status",
+        } <= {row[1] for row in connection.execute("PRAGMA table_info(runs)").fetchall()}
+        assert {
+            "intervention_records",
+            "stage_redirects",
+        } <= {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
 
 
 def test_normalized_attempt_results_and_stage_outputs_survive_reopen_immutably(

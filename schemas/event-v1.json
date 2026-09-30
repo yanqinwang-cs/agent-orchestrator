@@ -667,6 +667,169 @@
       "title": "InterventionDeliveredEvent",
       "type": "object"
     },
+    "InterventionLifecycleEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action Id"
+        },
+        "actor": {
+          "minLength": 1,
+          "title": "Actor",
+          "type": "string"
+        },
+        "attempt_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attempt Id"
+        },
+        "cause_event_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cause Event Id"
+        },
+        "command_id": {
+          "format": "uuid",
+          "title": "Command Id",
+          "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "intervention_validated",
+            "intervention_rejected",
+            "intervention_delivery_attempted",
+            "intervention_delivery_acknowledged",
+            "intervention_delivery_unsupported",
+            "intervention_delivery_failed",
+            "intervention_delivery_unknown",
+            "intervention_state_changed",
+            "reconciliation_requested",
+            "reconciliation_resolved",
+            "reconciliation_unresolved"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "reconciled_status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttemptStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reconciliation_known": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reconciliation Known"
+        },
+        "resulting_run_revision": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resulting Run Revision"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "sequence": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sequence"
+        }
+      },
+      "required": [
+        "event_id",
+        "run_id",
+        "occurred_at",
+        "actor",
+        "kind",
+        "command_id"
+      ],
+      "title": "InterventionLifecycleEvent",
+      "type": "object"
+    },
     "InterventionRequestedEvent": {
       "additionalProperties": false,
       "properties": {
@@ -741,6 +904,15 @@
       ],
       "title": "InterventionRequestedEvent",
       "type": "object"
+    },
+    "InterventionTargetScope": {
+      "enum": [
+        "run",
+        "stage",
+        "attempt"
+      ],
+      "title": "InterventionTargetScope",
+      "type": "string"
     },
     "OutboxStatus": {
       "enum": [
@@ -880,6 +1052,19 @@
           "title": "Kind",
           "type": "string"
         },
+        "run_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
         "schema_version": {
           "const": 1,
           "default": 1,
@@ -890,6 +1075,17 @@
           "minLength": 1,
           "title": "Target",
           "type": "string"
+        },
+        "target_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InterventionTargetScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -931,6 +1127,19 @@
           "title": "Recipient Profile Id",
           "type": "string"
         },
+        "run_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
         "schema_version": {
           "const": 1,
           "default": 1,
@@ -947,6 +1156,17 @@
           "minLength": 1,
           "title": "Target",
           "type": "string"
+        },
+        "target_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InterventionTargetScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -1115,6 +1335,19 @@
           "title": "Kind",
           "type": "string"
         },
+        "run_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
         "schema_version": {
           "const": 1,
           "default": 1,
@@ -1125,6 +1358,17 @@
           "minLength": 1,
           "title": "Target",
           "type": "string"
+        },
+        "target_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InterventionTargetScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -1165,6 +1409,19 @@
           "title": "Kind",
           "type": "string"
         },
+        "run_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
         "schema_version": {
           "const": 1,
           "default": 1,
@@ -1175,6 +1432,17 @@
           "minLength": 1,
           "title": "Target",
           "type": "string"
+        },
+        "target_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InterventionTargetScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -1457,6 +1725,19 @@
           "title": "Kind",
           "type": "string"
         },
+        "run_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
         "schema_version": {
           "const": 1,
           "default": 1,
@@ -1467,6 +1748,17 @@
           "minLength": 1,
           "title": "Target",
           "type": "string"
+        },
+        "target_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InterventionTargetScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -1510,6 +1802,28 @@
           "title": "Kind",
           "type": "string"
         },
+        "reason": {
+          "default": "user",
+          "enum": [
+            "user",
+            "timeout"
+          ],
+          "title": "Reason",
+          "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
         "schema_version": {
           "const": 1,
           "default": 1,
@@ -1520,6 +1834,17 @@
           "minLength": 1,
           "title": "Target",
           "type": "string"
+        },
+        "target_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InterventionTargetScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -1556,6 +1881,19 @@
           "title": "Kind",
           "type": "string"
         },
+        "run_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
         "schema_version": {
           "const": 1,
           "default": 1,
@@ -1566,6 +1904,17 @@
           "minLength": 1,
           "title": "Target",
           "type": "string"
+        },
+        "target_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InterventionTargetScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -1577,6 +1926,89 @@
       ],
       "title": "StopIntervention",
       "type": "object"
+    },
+    "TimeoutDetectedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "minLength": 1,
+          "title": "Actor",
+          "type": "string"
+        },
+        "attempt_id": {
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "cause_event_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cause Event Id"
+        },
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "timeout_detected",
+          "title": "Kind",
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "sequence": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sequence"
+        },
+        "timeout_seconds": {
+          "minimum": 1,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "event_id",
+        "run_id",
+        "occurred_at",
+        "actor",
+        "kind",
+        "attempt_id",
+        "timeout_seconds"
+      ],
+      "title": "TimeoutDetectedEvent",
+      "type": "object"
     }
   },
   "discriminator": {
@@ -1586,11 +2018,23 @@
       "attempt_status_changed": "#/$defs/AttemptStatusChangedEvent",
       "handoff_recorded": "#/$defs/HandoffRecordedEvent",
       "intervention_delivered": "#/$defs/InterventionDeliveredEvent",
+      "intervention_delivery_acknowledged": "#/$defs/InterventionLifecycleEvent",
+      "intervention_delivery_attempted": "#/$defs/InterventionLifecycleEvent",
+      "intervention_delivery_failed": "#/$defs/InterventionLifecycleEvent",
+      "intervention_delivery_unknown": "#/$defs/InterventionLifecycleEvent",
+      "intervention_delivery_unsupported": "#/$defs/InterventionLifecycleEvent",
+      "intervention_rejected": "#/$defs/InterventionLifecycleEvent",
       "intervention_requested": "#/$defs/InterventionRequestedEvent",
+      "intervention_state_changed": "#/$defs/InterventionLifecycleEvent",
+      "intervention_validated": "#/$defs/InterventionLifecycleEvent",
       "outbox_status_changed": "#/$defs/OutboxStatusChangedEvent",
+      "reconciliation_requested": "#/$defs/InterventionLifecycleEvent",
+      "reconciliation_resolved": "#/$defs/InterventionLifecycleEvent",
+      "reconciliation_unresolved": "#/$defs/InterventionLifecycleEvent",
       "reservation_status_changed": "#/$defs/ReservationStatusChangedEvent",
       "run_status_changed": "#/$defs/RunStatusChangedEvent",
-      "stage_status_changed": "#/$defs/StageStatusChangedEvent"
+      "stage_status_changed": "#/$defs/StageStatusChangedEvent",
+      "timeout_detected": "#/$defs/TimeoutDetectedEvent"
     },
     "propertyName": "kind"
   },
@@ -1612,6 +2056,12 @@
     },
     {
       "$ref": "#/$defs/InterventionDeliveredEvent"
+    },
+    {
+      "$ref": "#/$defs/InterventionLifecycleEvent"
+    },
+    {
+      "$ref": "#/$defs/TimeoutDetectedEvent"
     },
     {
       "$ref": "#/$defs/OutboxStatusChangedEvent"

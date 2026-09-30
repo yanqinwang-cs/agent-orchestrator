@@ -76,9 +76,10 @@ async def test_fake_backend_releases_scripted_events_in_order() -> None:
         SteerCommand(command_id=uuid4(), attempt_id="attempt-1", instruction="Prioritize security"),
     )
     interrupt_ack = await backend.interrupt(handle, uuid4())
-    assert steer_ack.accepted is True
+    assert steer_ack.accepted is False
+    assert steer_ack.reason == "worker already terminal"
     assert interrupt_ack.accepted is False
-    assert interrupt_ack.reason == "already complete"
+    assert interrupt_ack.reason == "worker already terminal"
 
 
 def test_fake_clock_advances_only_when_controlled() -> None:

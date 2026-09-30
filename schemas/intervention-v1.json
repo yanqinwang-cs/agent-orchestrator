@@ -1,5 +1,14 @@
 {
   "$defs": {
+    "InterventionTargetScope": {
+      "enum": [
+        "run",
+        "stage",
+        "attempt"
+      ],
+      "title": "InterventionTargetScope",
+      "type": "string"
+    },
     "PauseIntervention": {
       "additionalProperties": false,
       "properties": {
@@ -23,6 +32,19 @@
           "title": "Kind",
           "type": "string"
         },
+        "run_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
         "schema_version": {
           "const": 1,
           "default": 1,
@@ -33,6 +55,17 @@
           "minLength": 1,
           "title": "Target",
           "type": "string"
+        },
+        "target_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InterventionTargetScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -74,6 +107,19 @@
           "title": "Recipient Profile Id",
           "type": "string"
         },
+        "run_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
         "schema_version": {
           "const": 1,
           "default": 1,
@@ -90,6 +136,17 @@
           "minLength": 1,
           "title": "Target",
           "type": "string"
+        },
+        "target_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InterventionTargetScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -127,6 +184,19 @@
           "title": "Kind",
           "type": "string"
         },
+        "run_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
         "schema_version": {
           "const": 1,
           "default": 1,
@@ -137,6 +207,17 @@
           "minLength": 1,
           "title": "Target",
           "type": "string"
+        },
+        "target_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InterventionTargetScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -177,6 +258,19 @@
           "title": "Kind",
           "type": "string"
         },
+        "run_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
         "schema_version": {
           "const": 1,
           "default": 1,
@@ -187,6 +281,17 @@
           "minLength": 1,
           "title": "Target",
           "type": "string"
+        },
+        "target_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InterventionTargetScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -238,6 +343,19 @@
           "title": "Kind",
           "type": "string"
         },
+        "run_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
         "schema_version": {
           "const": 1,
           "default": 1,
@@ -248,6 +366,17 @@
           "minLength": 1,
           "title": "Target",
           "type": "string"
+        },
+        "target_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InterventionTargetScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -291,6 +420,28 @@
           "title": "Kind",
           "type": "string"
         },
+        "reason": {
+          "default": "user",
+          "enum": [
+            "user",
+            "timeout"
+          ],
+          "title": "Reason",
+          "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
         "schema_version": {
           "const": 1,
           "default": 1,
@@ -301,6 +452,17 @@
           "minLength": 1,
           "title": "Target",
           "type": "string"
+        },
+        "target_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InterventionTargetScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -337,6 +499,19 @@
           "title": "Kind",
           "type": "string"
         },
+        "run_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
         "schema_version": {
           "const": 1,
           "default": 1,
@@ -347,6 +522,17 @@
           "minLength": 1,
           "title": "Target",
           "type": "string"
+        },
+        "target_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InterventionTargetScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
