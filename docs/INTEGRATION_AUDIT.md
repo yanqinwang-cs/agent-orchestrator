@@ -1,29 +1,44 @@
 # Runtime and Codex integration audit
 
-Checked 28 September 2026. This is a source and configuration audit; **no live model calls, login changes or application runtime tests were performed**.
+Codex boundary rechecked 30 September 2026; other runtime comparisons retain their 28 September baseline. Offline package, schema, persistence and deterministic worker tests were run; **no account reads, live model calls or login changes were performed**.
 
 ## First real harness backend: Codex
 
-Codex is the planned first real worker backend because it fits the user's existing subscription-backed workflow. Keep it behind the provider-neutral `WorkerBackend`; do not make Codex types part of the domain contract. Through milestone 5, worker execution uses only the scripted fake backend and its deterministic control/recovery behavior; decision inference is deterministic or scripted offline. The settings below record the SDK target selected for the adapter; they do not claim that the adapter is implemented.
+Codex is the planned first real worker backend because it fits the user's existing subscription-backed workflow. Keep it behind the provider-neutral `WorkerBackend`; do not make Codex types part of the domain contract. Worker execution still uses the scripted fake for supported runs. The M6 Codex boundary now verifies the pinned local package pair, records rejected preflight evidence and refuses activation before SDK client construction. It is not yet a working turn adapter.
 
-Use the **official Python SDK, `openai-codex==0.147.0`**, behind `WorkerBackend`. The inspected PyPI distribution depends on `openai-codex-cli-bin==0.147.0`; use that matched pair initially. The locally installed standalone CLI is 0.154.0 and is a different compatibility target. Do not silently substitute it for the SDK's bundled binary. [PyPI metadata](https://pypi.org/pypi/openai-codex/json).
+Use **`openai-codex==0.159.2`** with its exact dependency **`openai-codex-cli-bin==0.159.2`**. This supersedes the earlier 0.147.0 target. Do not substitute the standalone CLI or infer compatibility from a minimum-version check. [PyPI version metadata](https://pypi.org/pypi/openai-codex/0.159.2/json).
 
-The SDK drives a local app-server and offers Python async APIs; a separate Node bridge and handwritten JSON-RPC client are unnecessary. Published source was downloaded without installation or execution and its wheel hash verified:
+The published wheel was downloaded and inspected without installing or executing it:
 
 ```text
-openai_codex-0.147.0-py3-none-any.whl
-sha256: ab2e0b3a41dba5a62be8561397cf3e7913afb53b5372ad881002a6f0b77e6a0a
+openai_codex-0.159.2-py3-none-any.whl
+sha256: 03c5a0d7c1da9edc4b62d7b4973d6e8199ce9462a7dec9c6dc9d75a2a88d3786
+runtime tag: rust-v0.159.2
+source commit: ff6aec96948b70d94983af2641a6b67c94faeff5
 ```
 
-In that wheel, `api.py` exposes `AsyncCodex.thread_start`, `AsyncThread.turn`, `AsyncTurnHandle.stream`, `steer` and `interrupt`, plus model listing and saved-thread reads/resume. `ApprovalMode.deny_all` maps to no escalation approvals; the default is `auto_review`, so override it explicitly. Sandbox values are `Sandbox.read_only` and `Sandbox.workspace_write`. The package has `CodexConfig.config_overrides`, `codex_bin`, `env` and `experimental_api`. Its process shutdown implementation terminates its app-server process; it does not establish a public guarantee of arbitrary descendant cleanup or crash reattachment. [Verified published wheel](https://files.pythonhosted.org/packages/3f/14/1a36ddc96152160768793689cd0924ffa78ce10e1bbb817fb4b006a96479/openai_codex-0.147.0-py3-none-any.whl).
+[Pinned SDK wheel](https://files.pythonhosted.org/packages/55/fd/89fa4ab1745e92dc8831f4a51ddc78ef216bfd5fcf3ca93c975c10555b77/openai_codex-0.159.2-py3-none-any.whl).
 
-| Integration | Fit | Decision |
-|---|---|---|
-| Python SDK | Typed local app-server client, streaming and live turn control; matched CLI package | Default; pin and test this pair |
-| Raw app-server | Direct protocol access, but transport/lifecycle/types become our responsibility | Use only if a required stable capability is missing from SDK |
-| `codex exec --json` | Simple batch worker with JSON events | Useful smoke/debug alternative; does not provide the same documented active-turn control interface |
+The current uv environment separately reports both installed distributions at 0.159.2. Its SDK-bundled executable reports `codex-cli 0.159.2`; on this macOS arm64 host the inspected binary SHA-256 is `16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704`. The offline fixture at `tests/fixtures/backends/codex-sdk-0.159.2.json` labels this as synthetic environment evidence, not a captured provider run.
 
-The SDK docs describe local app-server operation; the server protocol documents thread/turn lifecycle and control. SDK stream completion must be interpreted from its terminal event, not from the last text fragment. Resuming a saved thread restores conversation state, not a previously suspended OS process. [SDK guide](https://developers.openai.com/codex/sdk), [app-server protocol](https://developers.openai.com/codex/app-server).
+The SDK owns the local stdio transport. Prefer its public `AsyncCodexClient` typed methods for effective responses and notification routing: high-level `AsyncCodex.thread_start` discards effective thread settings. A typed `request` on that SDK for `config/read` is not a replacement transport. Keep experimental APIs disabled; do not implement raw app-server transport, a Node bridge or an alternate exec backend in M6. [Pinned SDK source](https://github.com/openai/codex/tree/ff6aec96948b70d94983af2641a6b67c94faeff5/sdk/python/src/openai_codex).
+
+| Boundary | Verified constraint and M6 decision |
+|---|---|
+| Start | New thread is conversation preparation; turn submission starts work. Use a fresh client/thread per attempt and never replay ambiguous submission. |
+| Steer | Acknowledges queued input, not consumed result revision. Advertise unavailable in M6 rather than advancing the ledger revision on this receipt. |
+| Interrupt | Exact-turn response is cancellation evidence; it does not settle process ownership. Follow with bounded cleanup. |
+| Close | SDK termination/kill does not prove reaping after kill or descendant settlement. Adapter settlement requires independent evidence. |
+| Read/restart | A new reader can synthesize interrupted status for stored active turns. History existence or terminal-looking status does not prove the old owner died. |
+| Async timeout | Cancelling an await cannot retract an RPC already sent. Preserve unknown launch/control outcomes. |
+
+The [pre-M6 evidence review](research/PRE_M6_CODEX_REVIEW.md) contains pinned implementation links, identity/ownership matrices and the architecture decision record. The M6 task specification defines the activation preconditions. These are source-level findings, not completed host compatibility or live inference tests.
+
+### M6 implementation state
+
+SQLite schema v5 stores immutable preflight snapshots linked to attempts and their immutable specification hashes. The coordinator journals each snapshot before dispatching a turn and passes the committed record ID/hash to `start`; the fake path remains backward compatible. A provider-neutral known-prelaunch failure type preserves the fake failure contract. The tested read-only report helper bounds and validates one JSON body, computes its digest from the exact output bytes and retains those bytes in the existing artifact store.
+
+Real activation is blocked on this host. The adapter has no implemented public SDK preparation/turn/event path and no independently verified supervisor for sanitizing the Codex child environment or settling owned processes. It currently rejects with explicit preflight issues before it creates an SDK client and advertises no active stream, interrupt, history, effort or output capabilities. `CodexConfig.env` inheritance, trusted configuration layers and `disabledPluginIds` remain reasons to keep that gate closed. No account/model call or login change was made. M6 must remain in progress until its offline lifecycle seams and host gates are implemented and demonstrated; live smoke checks still require separate explicit authorization.
 
 ## Runtime families
 
@@ -42,13 +57,15 @@ Default the app's SDK subprocess to a dedicated `CODEX_HOME` containing app-mana
 
 Milestone 6 must demonstrate effective sandbox/network settings, disabled unintended integrations and no undeclared nested delegation under the pinned binary. Set narrow overrides through supported config surfaces; do not assume a tool-name list is enforced by Codex. If a project config or extension makes the requested restrictions unverifiable, preflight must report the mismatch before launch. Do not claim that an instruction prompt creates a security boundary.
 
-A terminal turn receipt is not proof that unrelated descendant processes have stopped. The lifecycle owner needs bounded interrupt/shutdown checks, and unknown ownership must remain visible. Test this before enabling writer concurrency with real workers. No claim of exactly-once external side effects is made.
+The SDK's `env` merges with the service environment. A dedicated home therefore does not isolate credentials, proxy settings or integrations. M6 needs a verified sanitized launch boundary without mutating global environment; `CodexConfig.launch_args_override` is a possible public adapter-local integration point, not a demonstrated supervisor. Shell environment filtering is a separate boundary. Effective configuration and instruction sources must be inspected through supported responses; redact secrets before retaining provenance. `disabledPluginIds` does not enforce plugin exclusion. Deny-all approvals only deny escalation. Read-only does not mean project-only reads, and shell network policy does not cover harness model traffic, web search or external integrations.
+
+A terminal turn receipt is not proof that owned descendant processes have stopped. Before enabling real attempts, demonstrate bounded settlement on each supported host, including child survival and failed cleanup. Until proven, fail preflight or retain unknown ownership; do not emit a normalized terminal that releases capacity. No claim of exactly-once effects, active process reattachment or consumed steering revision is made.
 
 ## Development configuration compatibility
 
 Current Codex profiles are separate user-level files selected with `--profile`; project-local profile tables are not portable. Therefore this starter supplies real `.codex/config.toml` defaults plus a repository-owned preset launcher using documented CLI overrides. It never installs user profiles or rewrites the user's settings. Project configuration is loaded only after the project is trusted. [Configuration reference](https://developers.openai.com/codex/config-reference), [configuration layers](https://developers.openai.com/codex/config-advanced).
 
-Local `codex --help`, `codex exec --help` and `codex app-server --help` were inspected; app-server JSON Schema was generated offline with CLI 0.154.0. This verifies available CLI/protocol surfaces, not runtime compatibility of every combination. Milestone 6's fixtures and optional live tests remain the compatibility gate.
+Historical 28 September check: local `codex --help`, `codex exec --help` and `codex app-server --help` were inspected; app-server JSON Schema was generated offline with CLI 0.154.0. This verifies available CLI/protocol surfaces, not runtime compatibility of every combination. Milestone 6's fixtures and optional live tests remain the compatibility gate.
 
 Starter validation passed: all 11 TOML files parse; the 11 agents and six workflows pass basic reference/output/cycle checks; all six development launchers produce valid argument lists in dry-run mode; local Markdown links resolve. The proposed `.codex/config.toml` also validates against the [official configuration JSON Schema](https://developers.openai.com/codex/config-schema.json). These starter checks are lighter than the typed configuration validation delivered in milestone 1.
 

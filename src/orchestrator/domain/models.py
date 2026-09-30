@@ -642,6 +642,16 @@ class AttemptState(StrictModel):
     worker_thread_id: str | None = None
     worker_turn_id: str | None = None
     worker_lifecycle_owner_id: str | None = None
+    backend_preflight_record_id: str | None = None
+    backend_preflight_record_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+    @model_validator(mode="after")
+    def require_preflight_link_pair(self) -> AttemptState:
+        if (self.backend_preflight_record_id is None) != (
+            self.backend_preflight_record_hash is None
+        ):
+            raise ValueError("preflight record ID and hash must be stored together")
+        return self
 
 
 class Artifact(FrozenModel):
@@ -776,6 +786,7 @@ class EventKind(StrEnum):
     DECISION_ACCEPTED = "decision_accepted"
     DECISION_FALLBACK = "decision_fallback"
     DECISION_ATTENTION_REQUIRED = "decision_attention_required"
+    BACKEND_PREFLIGHT_RECORDED = "backend_preflight_recorded"
 
 
 class EventBase(FrozenModel):
@@ -916,6 +927,15 @@ class DecisionLifecycleEvent(EventBase):
     detail: str | None = None
 
 
+class BackendPreflightRecordedEvent(EventBase):
+    kind: Literal[EventKind.BACKEND_PREFLIGHT_RECORDED]
+    record_id: NonEmpty
+    attempt_id: NonEmpty
+    preparation_id: NonEmpty
+    record_hash: NonEmpty
+    accepted: bool
+
+
 type Event = Annotated[
     RunStatusChangedEvent
     | StageStatusChangedEvent
@@ -929,6 +949,7 @@ type Event = Annotated[
     | ReservationStatusChangedEvent
     | ArtifactRecordedEvent
     | HandoffRecordedEvent
-    | DecisionLifecycleEvent,
+    | DecisionLifecycleEvent
+    | BackendPreflightRecordedEvent,
     Field(discriminator="kind"),
 ]

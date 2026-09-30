@@ -9,7 +9,12 @@ from uuid import UUID
 
 from pydantic import Field, model_validator
 
-from orchestrator.domain.backend import ArtifactEntry, OutputStatus, WorkerResult
+from orchestrator.domain.backend import (
+    ArtifactEntry,
+    BackendPreflightSnapshot,
+    OutputStatus,
+    WorkerResult,
+)
 from orchestrator.domain.decisions import (
     DecisionDisposition,
     DecisionEngineFailure,
@@ -22,6 +27,7 @@ from orchestrator.domain.models import (
     AgentRunSpec,
     Artifact,
     AttemptState,
+    BackendPreflightRecordedEvent,
     Event,
     FrozenModel,
     Handoff,
@@ -310,6 +316,27 @@ class StageRedirect(FrozenModel):
     updated_at: datetime
 
 
+class BackendPreflightRecord(FrozenModel):
+    """Immutable, hash-linked record of one attempt's effective preflight."""
+
+    schema_version: Literal[1] = 1
+    record_id: NonEmpty
+    run_id: NonEmpty
+    attempt_id: NonEmpty
+    preparation_id: NonEmpty
+    attempt_spec_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    accepted: bool
+    occurred_at: datetime
+    snapshot: BackendPreflightSnapshot
+    record_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @model_validator(mode="after")
+    def require_linkage(self) -> BackendPreflightRecord:
+        if self.snapshot.preparation_id != self.preparation_id:
+            raise ValueError("preflight snapshot preparation ID does not match its record")
+        return self
+
+
 class DecisionRecord(FrozenModel):
     """Durable request and write-once normalized reply/disposition for a decision."""
 
@@ -408,6 +435,7 @@ class LedgerMutation(FrozenModel):
     intervention_records: tuple[InterventionRecord, ...] = ()
     stage_redirects: tuple[StageRedirect, ...] = ()
     decision_records: tuple[DecisionRecord, ...] = ()
+    backend_preflight_records: tuple[BackendPreflightRecord, ...] = ()
     receipt_outcome: CommandOutcome = CommandOutcome.ACCEPTED
     receipt_reason: str | None = None
 
@@ -441,6 +469,19 @@ class LedgerMutation(FrozenModel):
         decision_ids = [item.decision_id for item in self.decision_records]
         if len(decision_ids) != len(set(decision_ids)):
             raise ValueError("a mutation can update each decision record only once")
+        preflight_ids = [item.record_id for item in self.backend_preflight_records]
+        if len(preflight_ids) != len(set(preflight_ids)):
+            raise ValueError("a mutation can add each backend preflight record only once")
+        for record in self.backend_preflight_records:
+            if not any(
+                isinstance(event, BackendPreflightRecordedEvent)
+                and event.record_id == record.record_id
+                and event.attempt_id == record.attempt_id
+                and event.record_hash == record.record_hash
+                and event.accepted == record.accepted
+                for event in self.events
+            ):
+                raise ValueError("backend preflight records require a matching journal event")
         return self
 
 

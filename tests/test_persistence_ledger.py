@@ -2,12 +2,19 @@ import hashlib
 import sqlite3
 from datetime import UTC, datetime
 from io import BytesIO
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
 
 from orchestrator.artifacts import ArtifactPathError, ArtifactStore
-from orchestrator.domain.backend import ArtifactEntry, OutputStatus, WorkerResult
+from orchestrator.backends.codex_output import retain_read_only_report
+from orchestrator.domain.backend import (
+    ArtifactEntry,
+    BackendPreflightSnapshot,
+    OutputStatus,
+    PreflightFact,
+    WorkerResult,
+)
 from orchestrator.domain.decisions import (
     DecisionAcceptancePolicy,
     DecisionDispositionStatus,
@@ -21,7 +28,9 @@ from orchestrator.domain.models import (
     AgentRunSpec,
     AttemptState,
     AttemptStatus,
+    BackendPreflightRecordedEvent,
     Effort,
+    EventKind,
     Handoff,
     InterventionRequestedEvent,
     ModelBindingSettings,
@@ -44,6 +53,7 @@ from orchestrator.persistence.models import (
     ArtifactPublication,
     AttemptRegistration,
     AttemptResultRegistration,
+    BackendPreflightRecord,
     DecisionRecord,
     LedgerMutation,
     OutboxIntent,
@@ -109,10 +119,10 @@ def test_database_is_versioned_and_survives_reopen(tmp_path) -> None:
     path = tmp_path / "orchestrator.sqlite3"
 
     with SQLiteLedger(path) as ledger:
-        assert ledger.schema_version == 4
+        assert ledger.schema_version == 5
 
     with SQLiteLedger(path) as reopened:
-        assert reopened.schema_version == 4
+        assert reopened.schema_version == 5
 
 
 def test_database_rejects_a_schema_newer_than_this_application(tmp_path) -> None:
@@ -124,7 +134,7 @@ def test_database_rejects_a_schema_newer_than_this_application(tmp_path) -> None
         SQLiteLedger(path)
 
 
-@pytest.mark.parametrize("old_version", [1, 2, 3])
+@pytest.mark.parametrize("old_version", [1, 2, 3, 4])
 def test_old_database_migrates_without_rewriting_snapshots(
     tmp_path, app_config, old_version
 ) -> None:
@@ -191,7 +201,7 @@ def test_old_database_migrates_without_rewriting_snapshots(
             )
 
     with SQLiteLedger(path) as ledger:
-        assert ledger.schema_version == 4
+        assert ledger.schema_version == 5
         restored = ledger.get_run("legacy")
         assert restored.spec.snapshot_hash == legacy_hash
         assert restored.spec.workflow.policy.decision_questions == ()
@@ -200,7 +210,6 @@ def test_old_database_migrates_without_rewriting_snapshots(
     with sqlite3.connect(path) as connection:
         assert connection.execute("SELECT payload FROM run_specs").fetchone()[0] == legacy_payload
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
-    with sqlite3.connect(path) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(stages)").fetchall()}
         assert "result_payload" in columns
         assert (
@@ -209,10 +218,9 @@ def test_old_database_migrates_without_rewriting_snapshots(
             ).fetchone()
             is not None
         )
-        assert {
-            "attention_reason",
-            "resume_status",
-        } <= {row[1] for row in connection.execute("PRAGMA table_info(runs)").fetchall()}
+        assert {"attention_reason", "resume_status"} <= {
+            row[1] for row in connection.execute("PRAGMA table_info(runs)").fetchall()
+        }
         assert {
             "intervention_records",
             "stage_redirects",
@@ -223,6 +231,181 @@ def test_old_database_migrates_without_rewriting_snapshots(
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
         }
+
+
+def test_backend_preflight_record_and_event_are_immutable_and_survive_reopen(
+    tmp_path, app_config
+) -> None:
+    path = tmp_path / "preflight.sqlite3"
+    with SQLiteLedger(path) as ledger:
+        _, run_spec = _create_run(ledger, app_config)
+        spec = _attempt_spec("run-1", run_spec.snapshot_hash)
+        ledger.apply(
+            LedgerMutation(
+                command_id=uuid4(),
+                run_id="run-1",
+                expected_revision=0,
+                actor="test",
+                occurred_at=STAMP,
+                attempt_creations=(
+                    AttemptRegistration(
+                        spec=spec,
+                        stage_id="review",
+                        slot_id="review/slot-01",
+                        state=AttemptState(attempt_id="attempt-1", status=AttemptStatus.LAUNCHING),
+                    ),
+                ),
+            )
+        )
+        snapshot = BackendPreflightSnapshot(
+            preparation_id="prep-1",
+            observed_at=STAMP,
+            runtime=(PreflightFact(key="runtime_version", value="0.159.2", state="verified"),),
+        )
+        record_data = {
+            "record_id": "preflight-1",
+            "run_id": "run-1",
+            "attempt_id": "attempt-1",
+            "preparation_id": "prep-1",
+            "attempt_spec_hash": content_hash(canonical_json(spec)),
+            "accepted": True,
+            "occurred_at": STAMP,
+            "snapshot": snapshot,
+        }
+        record = BackendPreflightRecord(**record_data, record_hash="0" * 64)
+        record_hash = content_hash(
+            canonical_json(record.model_dump(mode="json", exclude={"record_hash"}))
+        )
+        record = record.model_copy(update={"record_hash": record_hash})
+        event = BackendPreflightRecordedEvent(
+            event_id=uuid4(),
+            run_id="run-1",
+            occurred_at=STAMP,
+            actor="test",
+            kind=EventKind.BACKEND_PREFLIGHT_RECORDED,
+            record_id=record.record_id,
+            attempt_id=record.attempt_id,
+            preparation_id=record.preparation_id,
+            record_hash=record.record_hash,
+            accepted=True,
+        )
+        current = ledger.get_attempt("attempt-1")
+        ledger.apply(
+            LedgerMutation(
+                command_id=uuid4(),
+                run_id="run-1",
+                expected_revision=1,
+                actor="test",
+                occurred_at=STAMP,
+                attempt_updates=(
+                    current.state.model_copy(
+                        update={
+                            "backend_preflight_record_id": record.record_id,
+                            "backend_preflight_record_hash": record.record_hash,
+                        }
+                    ),
+                ),
+                backend_preflight_records=(record,),
+                events=(event,),
+            )
+        )
+        assert ledger.get_backend_preflight_record(record.record_id) == record
+        assert ledger.list_backend_preflight_records("run-1") == (record,)
+        assert ledger.get_attempt("attempt-1").state.backend_preflight_record_hash == record_hash
+        assert any(
+            item.kind == EventKind.BACKEND_PREFLIGHT_RECORDED
+            for item in ledger.list_events("run-1")
+        )
+
+    with SQLiteLedger(path) as reopened:
+        assert reopened.get_backend_preflight_record("preflight-1") == record
+        assert reopened.list_backend_preflight_records("run-1") == (record,)
+        current = reopened.get_attempt("attempt-1")
+        with pytest.raises(LedgerInvariantError, match="link is immutable"):
+            reopened.apply(
+                LedgerMutation(
+                    command_id=uuid4(),
+                    run_id="run-1",
+                    expected_revision=2,
+                    actor="test",
+                    occurred_at=STAMP,
+                    attempt_updates=(
+                        current.state.model_copy(
+                            update={
+                                "backend_preflight_record_id": "another-record",
+                                "backend_preflight_record_hash": "1" * 64,
+                            }
+                        ),
+                    ),
+                )
+            )
+        with sqlite3.connect(path) as connection:
+            with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+                connection.execute(
+                    "DELETE FROM backend_preflight_records WHERE record_id = ?",
+                    (record.record_id,),
+                )
+
+
+def test_codex_read_only_report_is_bounded_and_retained_from_exact_bytes(
+    tmp_path, app_config, repo_root
+) -> None:
+    with SQLiteLedger(tmp_path / "codex-output.sqlite3") as ledger:
+        _, run_spec = _create_run(ledger, app_config)
+        spec = _attempt_spec("run-1", run_spec.snapshot_hash)
+        ledger.apply(
+            LedgerMutation(
+                command_id=uuid4(),
+                run_id="run-1",
+                expected_revision=0,
+                actor="test",
+                occurred_at=STAMP,
+                attempt_creations=(
+                    AttemptRegistration(
+                        spec=spec,
+                        stage_id="review",
+                        slot_id="review/slot-01",
+                        state=AttemptState(attempt_id="attempt-1", status=AttemptStatus.RUNNING),
+                    ),
+                ),
+            )
+        )
+        raw = (repo_root / "tests/fixtures/backends/codex-read-only-result-v1.json").read_bytes()
+        store = ArtifactStore(tmp_path / "artifacts", ledger)
+        result = retain_read_only_report(raw, spec, ledger, store, observed_at=STAMP)
+        artifact_id = str(
+            uuid5(
+                NAMESPACE_URL,
+                f"codex-report:{spec.attempt_id}:{content_hash(raw)}",
+            )
+        )
+
+        assert result.status == OutputStatus.PASS
+        assert len(result.artifacts) == 1
+        assert result.artifacts[0].name == "report"
+        assert result.artifacts[0].schema_id == "codex-read-only-result-v1"
+        assert result.artifacts[0].content_hash == content_hash(raw)
+        assert store.read(artifact_id) == raw
+        malformed = b"{}"
+        malformed_id = str(
+            uuid5(
+                NAMESPACE_URL,
+                f"codex-report:{spec.attempt_id}:{content_hash(malformed)}",
+            )
+        )
+        with pytest.raises(ValueError, match="does not match"):
+            retain_read_only_report(malformed, spec, ledger, store, observed_at=STAMP)
+        assert store.read(malformed_id) == malformed
+        oversized_prefix = b" " * 65_536
+        oversized_id = str(
+            uuid5(
+                NAMESPACE_URL,
+                f"codex-report:{spec.attempt_id}:{content_hash(oversized_prefix)}",
+            )
+        )
+        with pytest.raises(ValueError, match="byte limit"):
+            retain_read_only_report(b" " * 65_537, spec, ledger, store, observed_at=STAMP)
+        assert store.read(oversized_id) == oversized_prefix
 
 
 @pytest.mark.parametrize(

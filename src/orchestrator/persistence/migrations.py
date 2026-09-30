@@ -297,11 +297,39 @@ def _create_v4(connection: sqlite3.Connection) -> None:
     )
 
 
+def _create_v5(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        "CREATE TABLE backend_preflight_records ("
+        "record_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, attempt_id TEXT NOT NULL, "
+        "preparation_id TEXT NOT NULL, schema_version INTEGER NOT NULL, "
+        "attempt_spec_hash TEXT NOT NULL, accepted INTEGER NOT NULL CHECK (accepted IN (0, 1)), "
+        "record_hash TEXT NOT NULL, payload TEXT NOT NULL, occurred_at TEXT NOT NULL, "
+        "UNIQUE(attempt_id, preparation_id), "
+        "FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE, "
+        "FOREIGN KEY (attempt_id) REFERENCES attempts(attempt_id))"
+    )
+    connection.execute(
+        "CREATE INDEX backend_preflight_run_order "
+        "ON backend_preflight_records(run_id, occurred_at, record_id)"
+    )
+    connection.execute(
+        "CREATE TRIGGER backend_preflight_immutable_update BEFORE UPDATE "
+        "ON backend_preflight_records BEGIN SELECT RAISE(ABORT, "
+        "'backend preflight records are immutable'); END"
+    )
+    connection.execute(
+        "CREATE TRIGGER backend_preflight_immutable_delete BEFORE DELETE "
+        "ON backend_preflight_records BEGIN SELECT RAISE(ABORT, "
+        "'backend preflight records are immutable'); END"
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     (1, "durable-run-ledger", _create_v1),
     (2, "persist-worker-results-and-stage-outputs", _create_v2),
     (3, "persist-control-lifecycle-and-run-attention", _create_v3),
     (4, "persist-bounded-semantic-decisions", _create_v4),
+    (5, "persist-effective-backend-preflight", _create_v5),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1][0]
 

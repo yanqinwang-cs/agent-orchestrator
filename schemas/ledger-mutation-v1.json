@@ -555,6 +555,31 @@
           "title": "Attempt Id",
           "type": "string"
         },
+        "backend_preflight_record_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backend Preflight Record Hash"
+        },
+        "backend_preflight_record_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backend Preflight Record Id"
+        },
         "effective_input_revision": {
           "anyOf": [
             {
@@ -849,6 +874,278 @@
         "current"
       ],
       "title": "AttemptStatusChangedEvent",
+      "type": "object"
+    },
+    "BackendPreflightRecord": {
+      "additionalProperties": false,
+      "description": "Immutable, hash-linked record of one attempt's effective preflight.",
+      "properties": {
+        "accepted": {
+          "title": "Accepted",
+          "type": "boolean"
+        },
+        "attempt_id": {
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "attempt_spec_hash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Attempt Spec Hash",
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "preparation_id": {
+          "minLength": 1,
+          "title": "Preparation Id",
+          "type": "string"
+        },
+        "record_hash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Record Hash",
+          "type": "string"
+        },
+        "record_id": {
+          "minLength": 1,
+          "title": "Record Id",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "snapshot": {
+          "$ref": "#/$defs/BackendPreflightSnapshot"
+        }
+      },
+      "required": [
+        "record_id",
+        "run_id",
+        "attempt_id",
+        "preparation_id",
+        "attempt_spec_hash",
+        "accepted",
+        "occurred_at",
+        "snapshot",
+        "record_hash"
+      ],
+      "title": "BackendPreflightRecord",
+      "type": "object"
+    },
+    "BackendPreflightRecordedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "title": "Accepted",
+          "type": "boolean"
+        },
+        "actor": {
+          "minLength": 1,
+          "title": "Actor",
+          "type": "string"
+        },
+        "attempt_id": {
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "cause_event_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cause Event Id"
+        },
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "backend_preflight_recorded",
+          "title": "Kind",
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "preparation_id": {
+          "minLength": 1,
+          "title": "Preparation Id",
+          "type": "string"
+        },
+        "record_hash": {
+          "minLength": 1,
+          "title": "Record Hash",
+          "type": "string"
+        },
+        "record_id": {
+          "minLength": 1,
+          "title": "Record Id",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "sequence": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sequence"
+        }
+      },
+      "required": [
+        "event_id",
+        "run_id",
+        "occurred_at",
+        "actor",
+        "kind",
+        "record_id",
+        "attempt_id",
+        "preparation_id",
+        "record_hash",
+        "accepted"
+      ],
+      "title": "BackendPreflightRecordedEvent",
+      "type": "object"
+    },
+    "BackendPreflightSnapshot": {
+      "additionalProperties": false,
+      "description": "Effective preparation evidence; values must be sanitized before construction.",
+      "properties": {
+        "auth": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PreflightFact"
+          },
+          "title": "Auth",
+          "type": "array"
+        },
+        "binding": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PreflightFact"
+          },
+          "title": "Binding",
+          "type": "array"
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PreflightFact"
+          },
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "owner_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner Id"
+        },
+        "ownership": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PreflightFact"
+          },
+          "title": "Ownership",
+          "type": "array"
+        },
+        "permissions": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PreflightFact"
+          },
+          "title": "Permissions",
+          "type": "array"
+        },
+        "preparation_id": {
+          "minLength": 1,
+          "title": "Preparation Id",
+          "type": "string"
+        },
+        "provenance": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PreflightFact"
+          },
+          "title": "Provenance",
+          "type": "array"
+        },
+        "recovery": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PreflightFact"
+          },
+          "title": "Recovery",
+          "type": "array"
+        },
+        "runtime": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PreflightFact"
+          },
+          "title": "Runtime",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "preparation_id",
+        "observed_at"
+      ],
+      "title": "BackendPreflightSnapshot",
       "type": "object"
     },
     "CalibrationIdentity": {
@@ -2228,6 +2525,7 @@
           "artifact_recorded": "#/$defs/ArtifactRecordedEvent",
           "attempt_result_recorded": "#/$defs/AttemptResultRecordedEvent",
           "attempt_status_changed": "#/$defs/AttemptStatusChangedEvent",
+          "backend_preflight_recorded": "#/$defs/BackendPreflightRecordedEvent",
           "decision_abstained": "#/$defs/DecisionLifecycleEvent",
           "decision_accepted": "#/$defs/DecisionLifecycleEvent",
           "decision_attention_required": "#/$defs/DecisionLifecycleEvent",
@@ -2301,6 +2599,9 @@
         },
         {
           "$ref": "#/$defs/DecisionLifecycleEvent"
+        },
+        {
+          "$ref": "#/$defs/BackendPreflightRecordedEvent"
         }
       ]
     },
@@ -3345,6 +3646,76 @@
         "sandbox"
       ],
       "title": "PermissionSet",
+      "type": "object"
+    },
+    "PreflightFact": {
+      "additionalProperties": false,
+      "description": "A sanitized, provider-neutral fact observed before worker execution.",
+      "properties": {
+        "evidence_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence Ref"
+        },
+        "key": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Key",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "state": {
+          "enum": [
+            "verified",
+            "unverified",
+            "unsupported",
+            "not_applicable"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "required": [
+        "key",
+        "state"
+      ],
+      "title": "PreflightFact",
       "type": "object"
     },
     "RedirectIntervention": {
@@ -4739,6 +5110,14 @@
         "$ref": "#/$defs/AttemptState"
       },
       "title": "Attempt Updates",
+      "type": "array"
+    },
+    "backend_preflight_records": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/BackendPreflightRecord"
+      },
+      "title": "Backend Preflight Records",
       "type": "array"
     },
     "command_id": {

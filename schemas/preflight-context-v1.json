@@ -1,0 +1,50 @@
+{
+  "additionalProperties": false,
+  "description": "Coordinator-owned identity and resolved constraints for one preparation.",
+  "properties": {
+    "binding_id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Binding Id"
+    },
+    "preparation_id": {
+      "minLength": 1,
+      "title": "Preparation Id",
+      "type": "string"
+    },
+    "project_path": {
+      "minLength": 1,
+      "title": "Project Path",
+      "type": "string"
+    },
+    "record_id": {
+      "minLength": 1,
+      "title": "Record Id",
+      "type": "string"
+    },
+    "required_outputs": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Required Outputs",
+      "type": "array"
+    }
+  },
+  "required": [
+    "preparation_id",
+    "record_id",
+    "project_path",
+    "required_outputs"
+  ],
+  "title": "PreflightContext",
+  "type": "object"
+}

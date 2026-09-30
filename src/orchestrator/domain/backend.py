@@ -75,11 +75,6 @@ class PreflightIssue(StrictModel):
     setting: str | None = None
 
 
-class PreflightResult(StrictModel):
-    accepted: bool
-    issues: list[PreflightIssue] = Field(default_factory=list)
-
-
 class WorkerHandle(FrozenModel):
     handle_id: NonEmpty
     backend: Identifier
@@ -89,6 +84,67 @@ class WorkerHandle(FrozenModel):
     thread_id: str | None = None
     turn_id: str | None = None
     lifecycle_owner_id: NonEmpty
+
+
+class PreflightFact(StrictModel):
+    """A sanitized, provider-neutral fact observed before worker execution."""
+
+    key: Identifier
+    value: str | bool | int | None = None
+    state: Literal["verified", "unverified", "unsupported", "not_applicable"]
+    reason: str | None = None
+    evidence_ref: str | None = None
+
+
+class BackendPreflightSnapshot(FrozenModel):
+    """Effective preparation evidence; values must be sanitized before construction."""
+
+    schema_version: Literal[1] = 1
+    preparation_id: NonEmpty
+    owner_id: NonEmpty | None = None
+    observed_at: datetime
+    runtime: tuple[PreflightFact, ...] = ()
+    binding: tuple[PreflightFact, ...] = ()
+    auth: tuple[PreflightFact, ...] = ()
+    permissions: tuple[PreflightFact, ...] = ()
+    capabilities: tuple[PreflightFact, ...] = ()
+    ownership: tuple[PreflightFact, ...] = ()
+    provenance: tuple[PreflightFact, ...] = ()
+    recovery: tuple[PreflightFact, ...] = ()
+
+    @model_validator(mode="after")
+    def reject_secret_facts(self) -> BackendPreflightSnapshot:
+        sensitive = ("token", "secret", "password", "cookie", "credential", "private_key")
+        facts = (
+            *self.runtime,
+            *self.binding,
+            *self.auth,
+            *self.permissions,
+            *self.capabilities,
+            *self.ownership,
+            *self.provenance,
+            *self.recovery,
+        )
+        if any(any(part in fact.key.lower() for part in sensitive) for fact in facts):
+            raise ValueError("preflight facts cannot contain secret-bearing fields")
+        return self
+
+
+class PreflightContext(FrozenModel):
+    """Coordinator-owned identity and resolved constraints for one preparation."""
+
+    preparation_id: NonEmpty
+    record_id: NonEmpty
+    project_path: NonEmpty
+    required_outputs: tuple[NonEmpty, ...]
+    binding_id: NonEmpty | None = None
+
+
+class PreflightResult(StrictModel):
+    accepted: bool
+    issues: list[PreflightIssue] = Field(default_factory=list)
+    snapshot: BackendPreflightSnapshot | None = None
+    prepared_handle: WorkerHandle | None = None
 
 
 class WorkerIdentity(FrozenModel):

@@ -8,10 +8,14 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
+from orchestrator.backends.codex_output import CodexReadOnlyReport
 from orchestrator.domain.backend import (
     ArtifactEnvelope,
     BackendCapabilities,
+    BackendPreflightSnapshot,
     ControlAck,
+    PreflightContext,
+    PreflightFact,
     PreflightResult,
     Reconciliation,
     ShutdownReceipt,
@@ -55,6 +59,7 @@ from orchestrator.domain.models import (
 from orchestrator.persistence.models import (
     ArtifactManifest,
     AttemptResult,
+    BackendPreflightRecord,
     CommandReceipt,
     ControlDelivery,
     DecisionRecord,
@@ -101,7 +106,11 @@ SCHEMAS: dict[str, Any] = {
     "shutdown-receipt-v1": ShutdownReceipt,
     "artifact-envelope-v1": ArtifactEnvelope,
     "backend-capabilities-v1": BackendCapabilities,
+    "backend-preflight-snapshot-v1": BackendPreflightSnapshot,
+    "preflight-context-v1": PreflightContext,
+    "preflight-fact-v1": PreflightFact,
     "preflight-result-v1": PreflightResult,
+    "codex-read-only-result-v1": CodexReadOnlyReport,
     "artifact-v1": Artifact,
     "handoff-v1": Handoff,
     "development-config-v1": DevelopmentConfig,
@@ -109,6 +118,7 @@ SCHEMAS: dict[str, Any] = {
     "workflow-overlays-v1": WorkflowOverlayFile,
     "ledger-mutation-v1": LedgerMutation,
     "decision-record-v1": DecisionRecord,
+    "backend-preflight-record-v1": BackendPreflightRecord,
     "command-receipt-v1": CommandReceipt,
     "control-delivery-v1": ControlDelivery,
     "intervention-record-v1": InterventionRecord,

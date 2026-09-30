@@ -174,157 +174,71 @@
       ],
       "title": "PreflightFact",
       "type": "object"
-    },
-    "PreflightIssue": {
-      "additionalProperties": false,
-      "properties": {
-        "code": {
-          "minLength": 1,
-          "pattern": "^[a-z][a-z0-9_-]*$",
-          "title": "Code",
-          "type": "string"
-        },
-        "message": {
-          "minLength": 1,
-          "title": "Message",
-          "type": "string"
-        },
-        "setting": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Setting"
-        }
-      },
-      "required": [
-        "code",
-        "message"
-      ],
-      "title": "PreflightIssue",
-      "type": "object"
-    },
-    "WorkerHandle": {
-      "additionalProperties": false,
-      "properties": {
-        "attempt_id": {
-          "minLength": 1,
-          "title": "Attempt Id",
-          "type": "string"
-        },
-        "backend": {
-          "minLength": 1,
-          "pattern": "^[a-z][a-z0-9_-]*$",
-          "title": "Backend",
-          "type": "string"
-        },
-        "backend_version": {
-          "minLength": 1,
-          "title": "Backend Version",
-          "type": "string"
-        },
-        "handle_id": {
-          "minLength": 1,
-          "title": "Handle Id",
-          "type": "string"
-        },
-        "lifecycle_owner_id": {
-          "minLength": 1,
-          "title": "Lifecycle Owner Id",
-          "type": "string"
-        },
-        "session_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Session Id"
-        },
-        "thread_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Thread Id"
-        },
-        "turn_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Turn Id"
-        }
-      },
-      "required": [
-        "handle_id",
-        "backend",
-        "backend_version",
-        "attempt_id",
-        "lifecycle_owner_id"
-      ],
-      "title": "WorkerHandle",
-      "type": "object"
     }
   },
   "additionalProperties": false,
+  "description": "Immutable, hash-linked record of one attempt's effective preflight.",
   "properties": {
     "accepted": {
       "title": "Accepted",
       "type": "boolean"
     },
-    "issues": {
-      "items": {
-        "$ref": "#/$defs/PreflightIssue"
-      },
-      "title": "Issues",
-      "type": "array"
+    "attempt_id": {
+      "minLength": 1,
+      "title": "Attempt Id",
+      "type": "string"
     },
-    "prepared_handle": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/WorkerHandle"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
+    "attempt_spec_hash": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Attempt Spec Hash",
+      "type": "string"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "preparation_id": {
+      "minLength": 1,
+      "title": "Preparation Id",
+      "type": "string"
+    },
+    "record_hash": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Record Hash",
+      "type": "string"
+    },
+    "record_id": {
+      "minLength": 1,
+      "title": "Record Id",
+      "type": "string"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
     },
     "snapshot": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/BackendPreflightSnapshot"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
+      "$ref": "#/$defs/BackendPreflightSnapshot"
     }
   },
   "required": [
-    "accepted"
+    "record_id",
+    "run_id",
+    "attempt_id",
+    "preparation_id",
+    "attempt_spec_hash",
+    "accepted",
+    "occurred_at",
+    "snapshot",
+    "record_hash"
   ],
-  "title": "PreflightResult",
+  "title": "BackendPreflightRecord",
   "type": "object"
 }

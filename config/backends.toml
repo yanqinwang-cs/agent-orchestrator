@@ -1,11 +1,11 @@
-# Versioned settings examples for the current fake adapter and the planned first real adapter.
-# The Codex SDK entry is a target configuration; the runtime implementation is still fake-only.
+# Versioned settings for the fake adapter and the pinned Codex adapter boundary.
+# Codex preflight is implemented, but real activation remains fail-closed pending host evidence.
 schema_version = 1
 
 [backends.codex]
 kind = "codex_sdk"
 sdk_package = "openai-codex"
-sdk_version = "0.147.0"
+sdk_version = "0.159.2"
 cli_source = "sdk_pinned_dependency"
 client_per_attempt = true
 auth_owner = "codex"

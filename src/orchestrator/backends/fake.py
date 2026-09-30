@@ -11,9 +11,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID
 
+from orchestrator.backends.protocol import KnownPrelaunchFailure
 from orchestrator.domain.backend import (
     BackendCapabilities,
     ControlAck,
+    PreflightContext,
     PreflightResult,
     Reconciliation,
     ShutdownReceipt,
@@ -58,13 +60,8 @@ class ScriptedFailure:
     safe_to_retry: bool = True
 
 
-class FakeBackendFailure(RuntimeError):
+class FakeBackendFailure(KnownPrelaunchFailure):
     """A scripted failure known to have happened before a worker was started."""
-
-    def __init__(self, failure_class: FailureClass, summary: str, *, safe_to_retry: bool) -> None:
-        super().__init__(summary)
-        self.failure_class = failure_class
-        self.safe_to_retry = safe_to_retry
 
 
 class FakeClock:
@@ -158,7 +155,9 @@ class FakeBackend:
             enforceable_permission_settings=("sandbox", "approval_mode"),
         )
 
-    async def preflight(self, spec: AgentRunSpec) -> PreflightResult:
+    async def preflight(
+        self, spec: AgentRunSpec, context: PreflightContext | None = None
+    ) -> PreflightResult:
         if spec.backend != self.backend_id:
             from orchestrator.domain.backend import PreflightIssue
 
@@ -170,7 +169,13 @@ class FakeBackend:
             )
         return PreflightResult(accepted=True)
 
-    async def start(self, spec: AgentRunSpec) -> WorkerHandle:
+    async def start(
+        self,
+        spec: AgentRunSpec,
+        *,
+        preflight_record_id: str | None = None,
+        preflight_record_hash: str | None = None,
+    ) -> WorkerHandle:
         attempt_id = spec.attempt_id
         script = self._scripts.get(attempt_id)
         if script is None and self._script_factory is not None:

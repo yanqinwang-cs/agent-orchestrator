@@ -1,0 +1,17 @@
+{
+  "fixture_kind": "synthetic_offline",
+  "provider_traffic": false,
+  "sdk": {
+    "distribution": "openai-codex",
+    "version": "0.159.2",
+    "wheel_sha256": "03c5a0d7c1da9edc4b62d7b4973d6e8199ce9462a7dec9c6dc9d75a2a88d3786",
+    "source_revision": "ff6aec96948b70d94983af2641a6b67c94faeff5"
+  },
+  "cli": {
+    "distribution": "openai-codex-cli-bin",
+    "version": "0.159.2",
+    "platform": "macOS-arm64",
+    "sha256": "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
+  },
+  "notes": "Local bundled binary version and hash were inspected; this fixture is not captured live execution evidence."
+}

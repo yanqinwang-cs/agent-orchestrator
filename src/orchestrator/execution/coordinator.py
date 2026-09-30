@@ -12,12 +12,14 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from pydantic import ValidationError
 
-from orchestrator.backends.fake import FakeBackendFailure, FakeClock
-from orchestrator.backends.protocol import WorkerBackend
+from orchestrator.backends.fake import FakeClock
+from orchestrator.backends.protocol import KnownPrelaunchFailure, WorkerBackend
 from orchestrator.domain.backend import (
     ArtifactEntry,
+    BackendPreflightSnapshot,
     ControlAck,
     OutputStatus,
+    PreflightContext,
     Reconciliation,
     ShutdownReceipt,
     SteerCommand,
@@ -55,6 +57,7 @@ from orchestrator.domain.models import (
     AgentRunSpec,
     AttemptState,
     AttemptStatus,
+    BackendPreflightRecordedEvent,
     Condition,
     DecisionLifecycleEvent,
     Event,
@@ -97,6 +100,7 @@ from orchestrator.persistence.ledger import (
 from orchestrator.persistence.models import (
     AttemptRegistration,
     AttemptResultRegistration,
+    BackendPreflightRecord,
     CommandOutcome,
     CommandReceipt,
     ControlDelivery,
@@ -295,6 +299,8 @@ class ExecutionCoordinator:
         control_timeout_seconds: float = 5.0,
         decision_engine: DecisionEngine | None = None,
         decision_timeout_seconds: float = 30.0,
+        preflight_timeout_seconds: float = 30.0,
+        launch_timeout_seconds: float = 30.0,
     ) -> None:
         if global_parallelism < 1:
             raise ValueError("global_parallelism must be positive")
@@ -304,6 +310,8 @@ class ExecutionCoordinator:
             raise ValueError("control_timeout_seconds must be positive")
         if decision_timeout_seconds <= 0:
             raise ValueError("decision_timeout_seconds must be positive")
+        if preflight_timeout_seconds <= 0 or launch_timeout_seconds <= 0:
+            raise ValueError("backend preflight and launch timeouts must be positive")
         self.ledger = ledger
         self.backend = backend
         self.ownership = ownership
@@ -313,6 +321,8 @@ class ExecutionCoordinator:
         self.control_timeout_seconds = control_timeout_seconds
         self.decision_engine = decision_engine
         self.decision_timeout_seconds = decision_timeout_seconds
+        self.preflight_timeout_seconds = preflight_timeout_seconds
+        self.launch_timeout_seconds = launch_timeout_seconds
         self._elapsed_origins: dict[str, tuple[float, float]] = {}
         self._workers: dict[str, asyncio.Task[None]] = {}
 
@@ -472,27 +482,171 @@ class ExecutionCoordinator:
         if self._inhibits_launches(self.ledger.get_run(action.run_id).state.status):
             self._cancel_unlaunched_action(action, attempt, "run control inhibited launch")
             return 0
+        preflight = None
         try:
-            preflight = await self.backend.preflight(attempt.spec)
+            context = self._preflight_context(action, attempt)
+            preflight = await asyncio.wait_for(
+                self.backend.preflight(attempt.spec, context),
+                timeout=self.preflight_timeout_seconds,
+            )
+            preflight_record = None
+            if preflight.snapshot is not None:
+                if preflight.snapshot.preparation_id != context.preparation_id:
+                    if self._requires_backend_preflight_record():
+                        self._mark_unknown_launch(
+                            action.action_id,
+                            self.ledger.get_attempt(attempt_id),
+                            "Codex preflight snapshot preparation identity does not match",
+                        )
+                        return 0
+                    raise KnownPrelaunchFailure(
+                        FailureClass.CONFIGURATION,
+                        "backend preflight snapshot belongs to another preparation",
+                        safe_to_retry=False,
+                    )
+                preflight_record = self._persist_backend_preflight(
+                    action,
+                    attempt,
+                    context,
+                    preflight.accepted,
+                    preflight.snapshot,
+                )
+            elif self._requires_backend_preflight_record():
+                raise KnownPrelaunchFailure(
+                    FailureClass.CONFIGURATION,
+                    "Codex preflight did not provide an immutable effective snapshot",
+                    safe_to_retry=False,
+                )
             if not preflight.accepted:
                 issue = "; ".join(item.message for item in preflight.issues) or "preflight rejected"
+                if preflight.prepared_handle is not None:
+                    try:
+                        cleanup = await asyncio.wait_for(
+                            self.backend.close(preflight.prepared_handle),
+                            timeout=self._shutdown_grace_seconds(),
+                        )
+                    except Exception as error:
+                        self._mark_unknown_launch(
+                            action.action_id,
+                            self.ledger.get_attempt(attempt_id),
+                            f"rejected preparation cleanup is unknown: {type(error).__name__}",
+                        )
+                        return 0
+                    if not cleanup.settled:
+                        self._mark_unknown_launch(
+                            action.action_id,
+                            self.ledger.get_attempt(attempt_id),
+                            cleanup.detail or "rejected preparation cleanup is unsettled",
+                        )
+                        return 0
                 self._settle_launch_failure(
                     action.action_id,
-                    attempt,
+                    self.ledger.get_attempt(attempt_id),
                     FailureClass.CONFIGURATION,
                     issue,
                     safe_to_retry=False,
                 )
                 return 0
             if self._inhibits_launches(self.ledger.get_run(action.run_id).state.status):
+                if preflight.prepared_handle is not None:
+                    cleanup = await asyncio.wait_for(
+                        self.backend.close(preflight.prepared_handle),
+                        timeout=self._shutdown_grace_seconds(),
+                    )
+                    if not cleanup.settled:
+                        self._mark_unknown_launch(
+                            action.action_id,
+                            self.ledger.get_attempt(attempt_id),
+                            cleanup.detail or "prepared launch cleanup is unsettled",
+                        )
+                        return 0
                 self._cancel_unlaunched_action(
                     action,
                     self.ledger.get_attempt(attempt_id),
                     "run control inhibited launch after preflight",
                 )
                 return 0
-            handle = await self.backend.start(attempt.spec)
-        except FakeBackendFailure as error:
+            if self._requires_backend_preflight_record():
+                prepared = preflight.prepared_handle
+                if preflight_record is None or not preflight_record.accepted:
+                    raise KnownPrelaunchFailure(
+                        FailureClass.CONFIGURATION,
+                        "Codex turn start requires its committed accepted snapshot",
+                        safe_to_retry=False,
+                    )
+                if prepared is None:
+                    self._mark_unknown_launch(
+                        action.action_id,
+                        self.ledger.get_attempt(attempt_id),
+                        "Codex preflight omitted its prepared owner identity",
+                    )
+                    return 0
+                if (
+                    prepared.attempt_id != attempt_id
+                    or prepared.backend != attempt.spec.backend
+                    or prepared.lifecycle_owner_id != preflight_record.snapshot.owner_id
+                ):
+                    self._mark_unknown_launch(
+                        action.action_id,
+                        self.ledger.get_attempt(attempt_id),
+                        "Codex prepared owner does not match its immutable snapshot",
+                    )
+                    return 0
+                if prepared.turn_id is not None:
+                    self._mark_unknown_launch(
+                        action.action_id,
+                        self.ledger.get_attempt(attempt_id),
+                        "Codex preflight reported a turn before committed turn submission",
+                    )
+                    return 0
+                if prepared.thread_id is None:
+                    raise KnownPrelaunchFailure(
+                        FailureClass.CONFIGURATION,
+                        "Codex preflight did not create a correlated fresh thread",
+                        safe_to_retry=False,
+                    )
+            if preflight_record is not None:
+                start_call = self.backend.start(
+                    attempt.spec,
+                    preflight_record_id=preflight_record.record_id,
+                    preflight_record_hash=preflight_record.record_hash,
+                )
+            else:
+                start_call = self.backend.start(attempt.spec)
+            handle = await asyncio.wait_for(start_call, timeout=self.launch_timeout_seconds)
+        except KnownPrelaunchFailure as error:
+            if (
+                self._requires_backend_preflight_record()
+                and preflight is not None
+                and preflight.prepared_handle is not None
+            ):
+                try:
+                    cleanup = await asyncio.wait_for(
+                        self.backend.close(preflight.prepared_handle),
+                        timeout=self._shutdown_grace_seconds(),
+                    )
+                except Exception as cleanup_error:
+                    self._mark_unknown_launch(
+                        action.action_id,
+                        self.ledger.get_attempt(attempt_id),
+                        "known prelaunch failure cleanup is unknown: "
+                        f"{type(cleanup_error).__name__}",
+                    )
+                    return 0
+                if not cleanup.settled:
+                    self._mark_unknown_launch(
+                        action.action_id,
+                        self.ledger.get_attempt(attempt_id),
+                        cleanup.detail or "known prelaunch failure cleanup is unsettled",
+                    )
+                    return 0
+            elif self._requires_backend_preflight_record():
+                self._mark_unknown_launch(
+                    action.action_id,
+                    self.ledger.get_attempt(attempt_id),
+                    "Codex prelaunch failure did not provide owner cleanup evidence",
+                )
+                return 0
             self._settle_launch_failure(
                 action.action_id,
                 self.ledger.get_attempt(attempt_id),
@@ -507,7 +661,7 @@ class ExecutionCoordinator:
             self._mark_unknown_launch(
                 action.action_id,
                 self.ledger.get_attempt(attempt_id),
-                f"launch outcome is unknown: {type(error).__name__}: {error}",
+                f"launch outcome is unknown: {type(error).__name__}",
             )
             return 0
 
@@ -519,13 +673,103 @@ class ExecutionCoordinator:
             self._mark_unknown_launch(
                 action.action_id,
                 self.ledger.get_attempt(attempt_id),
-                f"launch acknowledgement could not be persisted: {error}",
+                f"launch acknowledgement could not be persisted: {type(error).__name__}",
             )
             return 0
         task = asyncio.create_task(self._consume(attempt_id, handle))
         self._workers[attempt_id] = task
         task.add_done_callback(partial(self._worker_done, attempt_id))
         return 1
+
+    def _shutdown_grace_seconds(self) -> float:
+        settings = getattr(self.backend, "settings", None)
+        configured = getattr(settings, "shutdown_grace_seconds", None)
+        return float(configured if configured is not None else self.control_timeout_seconds)
+
+    def _requires_backend_preflight_record(self) -> bool:
+        return bool(getattr(self.backend, "requires_preflight_record", False))
+
+    def _preflight_context(
+        self, action: OutboxAction, attempt: PersistedAttempt
+    ) -> PreflightContext:
+        run = self.ledger.get_run(action.run_id)
+        profile = self._profile(run, attempt.spec.profile_id)
+        stage = next(
+            (item for item in run.spec.workflow.stages if item.id == attempt.stage_id), None
+        )
+        if stage is None:
+            raise LedgerInvariantError(f"attempt references missing stage {attempt.stage_id}")
+        outputs = tuple(dict.fromkeys((*profile.required_outputs, *stage.required_outputs)))
+        return PreflightContext(
+            preparation_id=str(action.action_id),
+            record_id=str(uuid5(NAMESPACE_URL, f"backend-preflight:{action.action_id}")),
+            project_path=run.project_config.path,
+            required_outputs=outputs,
+            binding_id=profile.model_binding,
+        )
+
+    def _persist_backend_preflight(
+        self,
+        action: OutboxAction,
+        attempt: PersistedAttempt,
+        context: PreflightContext,
+        accepted: bool,
+        snapshot: BackendPreflightSnapshot,
+    ) -> BackendPreflightRecord:
+        occurred_at = self._now()
+        record = BackendPreflightRecord(
+            record_id=context.record_id,
+            run_id=action.run_id,
+            attempt_id=attempt.spec.attempt_id,
+            preparation_id=context.preparation_id,
+            attempt_spec_hash=content_hash(canonical_json(attempt.spec)),
+            accepted=accepted,
+            occurred_at=occurred_at,
+            snapshot=snapshot,
+            record_hash="0" * 64,
+        )
+        record_hash = content_hash(
+            canonical_json(record.model_dump(mode="json", exclude={"record_hash"}))
+        )
+        record = record.model_copy(update={"record_hash": record_hash})
+        event = BackendPreflightRecordedEvent(
+            event_id=uuid4(),
+            run_id=action.run_id,
+            occurred_at=occurred_at,
+            actor=self.actor,
+            kind=EventKind.BACKEND_PREFLIGHT_RECORDED,
+            record_id=record.record_id,
+            attempt_id=record.attempt_id,
+            preparation_id=record.preparation_id,
+            record_hash=record.record_hash,
+            accepted=record.accepted,
+        )
+
+        def build(run: PersistedRun) -> LedgerMutation:
+            current = self.ledger.get_attempt(attempt.spec.attempt_id)
+            if current.spec != attempt.spec:
+                raise LedgerInvariantError("attempt specification changed after preflight")
+            if current.state.backend_preflight_record_id not in {None, record.record_id}:
+                raise LedgerInvariantError("attempt already has a different preflight record")
+            updated = current.state.model_copy(
+                update={
+                    "backend_preflight_record_id": record.record_id,
+                    "backend_preflight_record_hash": record.record_hash,
+                }
+            )
+            return LedgerMutation(
+                command_id=uuid4(),
+                run_id=run.run_id,
+                expected_revision=run.state.revision,
+                actor=self.actor,
+                occurred_at=occurred_at,
+                attempt_updates=(updated,),
+                backend_preflight_records=(record,),
+                events=(event,),
+            )
+
+        self._commit(action.run_id, build)
+        return record
 
     @staticmethod
     def _inhibits_launches(status: RunStatus) -> bool:
@@ -1285,7 +1529,7 @@ class ExecutionCoordinator:
             except BaseException as error:
                 reconciliation = Reconciliation(
                     known=False,
-                    detail=f"backend inspection failed: {type(error).__name__}: {error}",
+                    detail=f"backend inspection failed: {type(error).__name__}",
                 )
 
         now = self._now()
@@ -2059,7 +2303,7 @@ class ExecutionCoordinator:
             self._finish_control_delivery(
                 action,
                 ControlDeliveryStatus.UNKNOWN,
-                f"control delivery outcome is uncertain: {type(error).__name__}: {error}",
+                f"control delivery outcome is uncertain: {type(error).__name__}",
                 outbox_status=OutboxStatus.UNKNOWN,
                 mark_unknown_attempt=action.kind == "interrupt_attempt",
                 mark_input_uncertain=action.kind == "steer_attempt",
@@ -2148,7 +2392,7 @@ class ExecutionCoordinator:
             self._finish_control_delivery(
                 action,
                 ControlDeliveryStatus.UNKNOWN,
-                f"worker close outcome is uncertain: {type(error).__name__}: {error}",
+                f"worker close outcome is uncertain: {type(error).__name__}",
                 outbox_status=OutboxStatus.UNKNOWN,
                 mark_unknown_attempt=True,
                 attention_reason="worker ownership remains unresolved after stop request",
@@ -2533,7 +2777,7 @@ class ExecutionCoordinator:
             self._mark_unknown_launch(
                 self._action_for_attempt(attempt_id),
                 self.ledger.get_attempt(attempt_id),
-                f"worker stream outcome is unknown: {type(error).__name__}: {error}",
+                f"worker stream outcome is unknown: {type(error).__name__}",
             )
 
     @staticmethod
@@ -2631,8 +2875,8 @@ class ExecutionCoordinator:
                     or "\\" in artifact.relative_path
                 ):
                     raise ValueError(f"output {artifact.name} has an unsafe relative path")
-        except (ValidationError, ValueError) as error:
-            validation_error = f"invalid artifact-envelope-v1 result: {error}"
+        except (ValidationError, ValueError):
+            validation_error = "invalid artifact-envelope-v1 result"
 
         if validation_error:
             self._settle_failure(

@@ -1,0 +1,30 @@
+{
+  "fixture_kind": "synthetic_offline",
+  "provider_traffic": false,
+  "ownership_profile": "service_supplied_capabilities",
+  "capabilities": [
+    {
+      "name": "filesystem_read",
+      "execution_owner": "service",
+      "enforcement_owner": "service",
+      "settlement_owner": "service",
+      "state": "verified"
+    },
+    {
+      "name": "terminal",
+      "execution_owner": "service",
+      "enforcement_owner": "service",
+      "settlement_owner": "service",
+      "state": "verified"
+    },
+    {
+      "name": "codex_builtin_tools",
+      "execution_owner": null,
+      "enforcement_owner": null,
+      "settlement_owner": null,
+      "state": "unsupported",
+      "reason": "this ownership profile does not expose harness-owned tools"
+    }
+  ],
+  "note": "Ownership comparison fixture only; it does not enable Codex execution or add tool callbacks."
+}

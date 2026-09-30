@@ -1,0 +1,70 @@
+{
+  "additionalProperties": false,
+  "description": "A sanitized, provider-neutral fact observed before worker execution.",
+  "properties": {
+    "evidence_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Evidence Ref"
+    },
+    "key": {
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "title": "Key",
+      "type": "string"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason"
+    },
+    "state": {
+      "enum": [
+        "verified",
+        "unverified",
+        "unsupported",
+        "not_applicable"
+      ],
+      "title": "State",
+      "type": "string"
+    },
+    "value": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Value"
+    }
+  },
+  "required": [
+    "key",
+    "state"
+  ],
+  "title": "PreflightFact",
+  "type": "object"
+}

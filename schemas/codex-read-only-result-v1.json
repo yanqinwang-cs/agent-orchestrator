@@ -1,0 +1,40 @@
+{
+  "additionalProperties": false,
+  "description": "The only Codex output body accepted by the M6 read-only bridge.",
+  "properties": {
+    "findings": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Findings",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "status": {
+      "enum": [
+        "pass",
+        "fail",
+        "blocked"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "summary": {
+      "minLength": 1,
+      "title": "Summary",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "status",
+    "summary"
+  ],
+  "title": "CodexReadOnlyReport",
+  "type": "object"
+}

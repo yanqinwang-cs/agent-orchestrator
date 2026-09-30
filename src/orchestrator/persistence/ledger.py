@@ -26,6 +26,7 @@ from orchestrator.domain.models import (
     AttemptState,
     AttemptStatus,
     AttemptStatusChangedEvent,
+    BackendPreflightRecordedEvent,
     Event,
     EventKind,
     Handoff,
@@ -52,6 +53,7 @@ from orchestrator.persistence.models import (
     AttemptRegistration,
     AttemptResult,
     AttemptResultRegistration,
+    BackendPreflightRecord,
     CommandOutcome,
     CommandReceipt,
     DecisionRecord,
@@ -645,6 +647,8 @@ class SQLiteLedger:
 
             for attempt_registration in mutation.attempt_creations:
                 self._register_attempt(connection, mutation, attempt_registration, generated_events)
+            for preflight_record in mutation.backend_preflight_records:
+                self._insert_backend_preflight(connection, mutation, preflight_record)
             for state in mutation.attempt_updates:
                 self._update_attempt(connection, mutation, state, generated_events)
             for result in mutation.attempt_results:
@@ -869,6 +873,25 @@ class SQLiteLedger:
         ).fetchone()
         if row is None:
             raise LedgerInvariantError(f"run {mutation.run_id} has no attempt {state.attempt_id}")
+        previous_state = AttemptState.model_validate(json.loads(row["state_payload"]))
+        if previous_state.backend_preflight_record_id is not None and (
+            state.backend_preflight_record_id != previous_state.backend_preflight_record_id
+            or state.backend_preflight_record_hash != previous_state.backend_preflight_record_hash
+        ):
+            raise LedgerInvariantError("attempt preflight record link is immutable")
+        if state.backend_preflight_record_id is not None:
+            preflight = connection.execute(
+                "SELECT attempt_id, record_hash FROM backend_preflight_records WHERE record_id = ?",
+                (state.backend_preflight_record_id,),
+            ).fetchone()
+            if (
+                preflight is None
+                or preflight["attempt_id"] != state.attempt_id
+                or preflight["record_hash"] != state.backend_preflight_record_hash
+            ):
+                raise LedgerInvariantError(
+                    "attempt references a missing or mismatched preflight record"
+                )
         previous = AttemptStatus(row["status"])
         connection.execute(
             "UPDATE attempts SET status = ?, state_payload = ?, updated_at = ? "
@@ -1477,6 +1500,73 @@ class SQLiteLedger:
             (record_payload, _iso(record.completed_at), decision_id),
         )
 
+    def _insert_backend_preflight(
+        self,
+        connection: sqlite3.Connection,
+        mutation: LedgerMutation,
+        record: BackendPreflightRecord,
+    ) -> None:
+        if record.run_id != mutation.run_id:
+            raise LedgerInvariantError("backend preflight record belongs to another run")
+        attempt = connection.execute(
+            "SELECT run_id, spec_hash FROM attempts WHERE attempt_id = ?",
+            (record.attempt_id,),
+        ).fetchone()
+        if attempt is None or attempt["run_id"] != mutation.run_id:
+            raise LedgerInvariantError("backend preflight record references another attempt")
+        if attempt["spec_hash"] != record.attempt_spec_hash:
+            raise ImmutableSpecificationConflict(
+                "backend preflight hash does not match the immutable attempt specification"
+            )
+        payload = record.model_dump(mode="json", exclude={"record_hash"})
+        if content_hash(canonical_json(payload)) != record.record_hash:
+            raise LedgerInvariantError("backend preflight record hash is invalid")
+        matching_event = any(
+            isinstance(event, BackendPreflightRecordedEvent)
+            and event.run_id == record.run_id
+            and event.record_id == record.record_id
+            and event.attempt_id == record.attempt_id
+            and event.preparation_id == record.preparation_id
+            and event.record_hash == record.record_hash
+            and event.accepted == record.accepted
+            for event in mutation.events
+        )
+        if not matching_event:
+            raise LedgerInvariantError("backend preflight record has no matching journal event")
+        existing = connection.execute(
+            "SELECT payload FROM backend_preflight_records WHERE record_id = ?",
+            (record.record_id,),
+        ).fetchone()
+        serialized = canonical_json(record)
+        if existing is not None:
+            if existing["payload"] == serialized:
+                return
+            raise ImmutableSpecificationConflict(
+                "backend preflight record identity was reused with different evidence"
+            )
+        try:
+            connection.execute(
+                "INSERT INTO backend_preflight_records(record_id, run_id, attempt_id, "
+                "preparation_id, schema_version, attempt_spec_hash, accepted, record_hash, "
+                "payload, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    record.record_id,
+                    record.run_id,
+                    record.attempt_id,
+                    record.preparation_id,
+                    record.schema_version,
+                    record.attempt_spec_hash,
+                    int(record.accepted),
+                    record.record_hash,
+                    serialized,
+                    _iso(record.occurred_at),
+                ),
+            )
+        except sqlite3.IntegrityError as error:
+            raise ImmutableSpecificationConflict(
+                "backend preflight preparation identity was already recorded"
+            ) from error
+
     def _state_from_row(self, row: sqlite3.Row) -> RunState:
         return RunState(
             run_id=row["run_id"],
@@ -1606,6 +1696,47 @@ class SQLiteLedger:
             if row is None:
                 raise KeyError(str(decision_id))
             return DecisionRecord.model_validate(json.loads(row["record_payload"]))
+
+    def get_backend_preflight_record(self, record_id: str) -> BackendPreflightRecord:
+        with self._read_transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM backend_preflight_records WHERE record_id = ?", (record_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(record_id)
+            return self._backend_preflight_from_row(row)
+
+    def list_backend_preflight_records(self, run_id: str) -> tuple[BackendPreflightRecord, ...]:
+        with self._read_transaction() as connection:
+            run_exists = connection.execute(
+                "SELECT 1 FROM runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+            if run_exists is None:
+                raise RunNotFound(run_id)
+            rows = connection.execute(
+                "SELECT * FROM backend_preflight_records WHERE run_id = ? "
+                "ORDER BY occurred_at, record_id",
+                (run_id,),
+            ).fetchall()
+            return tuple(self._backend_preflight_from_row(row) for row in rows)
+
+    @staticmethod
+    def _backend_preflight_from_row(row: sqlite3.Row) -> BackendPreflightRecord:
+        record = BackendPreflightRecord.model_validate(json.loads(row["payload"]))
+        payload = record.model_dump(mode="json", exclude={"record_hash"})
+        if (
+            record.record_hash != row["record_hash"]
+            or content_hash(canonical_json(payload)) != record.record_hash
+        ):
+            raise LedgerInvariantError("persisted backend preflight hash verification failed")
+        if (
+            record.record_id != row["record_id"]
+            or record.run_id != row["run_id"]
+            or record.attempt_id != row["attempt_id"]
+            or record.preparation_id != row["preparation_id"]
+        ):
+            raise LedgerInvariantError("persisted backend preflight index does not match payload")
+        return record
 
     def list_decision_records(self, run_id: str) -> tuple[DecisionRecord, ...]:
         with self._read_transaction() as connection:

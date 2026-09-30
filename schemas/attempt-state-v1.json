@@ -44,6 +44,31 @@
       "title": "Attempt Id",
       "type": "string"
     },
+    "backend_preflight_record_hash": {
+      "anyOf": [
+        {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Backend Preflight Record Hash"
+    },
+    "backend_preflight_record_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Backend Preflight Record Id"
+    },
     "effective_input_revision": {
       "anyOf": [
         {

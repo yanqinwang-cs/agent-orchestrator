@@ -1058,6 +1058,58 @@ async def test_invalid_output_fails_stage_and_persists_invalid_result(
 
 
 @pytest.mark.asyncio
+async def test_late_start_ack_after_timeout_never_replays_or_releases_reservation(
+    app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "review", "late-start")
+
+    class LateStartBackend(FakeBackend):
+        def __init__(self) -> None:
+            super().__init__(
+                backend_id="codex",
+                script_factory=lambda spec: AttemptScript(
+                    events=_worker_script(spec).events,
+                    start_barrier=True,
+                ),
+                auto_release=False,
+            )
+            self.late_ack = None
+
+        async def start(self, spec, *, preflight_record_id=None, preflight_record_hash=None):
+            self.late_ack = asyncio.create_task(
+                super().start(
+                    spec,
+                    preflight_record_id=preflight_record_id,
+                    preflight_record_hash=preflight_record_hash,
+                )
+            )
+            return await asyncio.shield(self.late_ack)
+
+    backend = LateStartBackend()
+    coordinator = ExecutionCoordinator(
+        ledger,
+        backend,
+        ownership,
+        clock=FakeClock(origin=STAMP),
+        launch_timeout_seconds=0.01,
+    )
+
+    status = await coordinator.run_until_stalled("late-start")
+    attempt = ledger.list_attempts("late-start")[0]
+    assert status == RunStatus.ATTENTION_REQUIRED
+    assert attempt.state.status == AttemptStatus.OUTCOME_UNKNOWN
+    assert backend.late_ack is not None
+    await backend.wait_until_start_waiting(attempt.spec.attempt_id)
+    backend.release_start(attempt.spec.attempt_id)
+    await backend.late_ack
+
+    assert backend.start_calls == [attempt.spec.attempt_id]
+    assert ledger.get_attempt(attempt.spec.attempt_id).state.status == AttemptStatus.OUTCOME_UNKNOWN
+    assert any(item.status.value == "held" for item in ledger.list_reservations("late-start"))
+
+
+@pytest.mark.asyncio
 async def test_wrong_terminal_attempt_identity_is_recorded_as_invalid_output(
     tmp_path, app_config, ledger_owner
 ) -> None:
