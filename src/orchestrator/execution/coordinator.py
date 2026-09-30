@@ -667,6 +667,14 @@ class ExecutionCoordinator:
                 for dependency in stage.depends_on
             ):
                 continue
+            repair_gate = stage_by_id.get("repair_gate")
+            repair_decision = (
+                repair_gate.result.decision
+                if repair_gate is not None and repair_gate.result is not None
+                else None
+            )
+            if evaluate_condition(stage, repair_decision) is not True:
+                continue
             await self._request_and_run_decision(run, question)
             return True
         return False
@@ -850,9 +858,20 @@ class ExecutionCoordinator:
         reply: DecisionEngineReply,
     ) -> None:
         request = record.request
+        question = next(
+            item
+            for item in self.ledger.get_run(run_id).spec.workflow.policy.decision_questions
+            if item.question_id == request.question_id
+        )
+        if reply.decision_id != request.decision_id:
+            reply = DecisionEngineFailure(
+                decision_id=request.decision_id,
+                classification=DecisionFailureClass.INCOMPATIBLE_RESULT,
+                detail=f"engine reply belongs to another decision: {reply.decision_id}",
+            )
         for _ in range(5):
             current = self.ledger.get_run(run_id)
-            current_allowed = self._decision_outcome_ids(current, request.question_id)
+            current_allowed = self._decision_outcome_ids(current, question.stage_id)
             evaluation_revision = (
                 request.current_run_revision
                 if current.state.revision == record.request_persisted_revision
@@ -909,11 +928,7 @@ class ExecutionCoordinator:
                 stage_redirects = (
                     StageRedirect(
                         run_id=run_id,
-                        stage_id=next(
-                            item.stage_id
-                            for item in current.spec.workflow.policy.decision_questions
-                            if item.question_id == request.question_id
-                        ),
+                        stage_id=question.stage_id,
                         recipient_profile_id=selected,
                         command_id=request.decision_id,
                         updated_at=self._now(),
@@ -970,19 +985,7 @@ class ExecutionCoordinator:
                 raise LedgerInvariantError(receipt.reason or "decision disposition was rejected")
         raise LedgerInvariantError("run kept changing while persisting a decision disposition")
 
-    def _decision_outcome_ids(
-        self, run: PersistedRun, stage_id_or_question_id: str
-    ) -> tuple[str, ...]:
-        question = next(
-            (
-                item
-                for item in run.spec.workflow.policy.decision_questions
-                if item.stage_id == stage_id_or_question_id
-                or item.question_id == stage_id_or_question_id
-            ),
-            None,
-        )
-        stage_id = question.stage_id if question is not None else stage_id_or_question_id
+    def _decision_outcome_ids(self, run: PersistedRun, stage_id: str) -> tuple[str, ...]:
         redirect = next(
             (item for item in run.spec.workflow.allowed_redirects if item.stage == stage_id), None
         )

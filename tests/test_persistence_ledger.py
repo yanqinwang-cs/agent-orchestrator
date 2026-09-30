@@ -10,17 +10,12 @@ from orchestrator.artifacts import ArtifactPathError, ArtifactStore
 from orchestrator.domain.backend import ArtifactEntry, OutputStatus, WorkerResult
 from orchestrator.domain.decisions import (
     DecisionAcceptancePolicy,
-    DecisionDisposition,
-    DecisionDispositionReason,
     DecisionDispositionStatus,
-    DecisionInferenceBinding,
-    DecisionMechanism,
     DecisionOption,
-    DecisionPolicyAction,
     DecisionRequest,
     DecisionResult,
     decision_request_hash,
-    decision_result_hash,
+    evaluate_decision,
 )
 from orchestrator.domain.models import (
     AgentRunSpec,
@@ -42,6 +37,8 @@ from orchestrator.persistence.ledger import (
     ImmutableSpecificationConflict,
     LedgerInvariantError,
     ReservationConflict,
+    canonical_json,
+    content_hash,
 )
 from orchestrator.persistence.models import (
     ArtifactPublication,
@@ -127,20 +124,82 @@ def test_database_rejects_a_schema_newer_than_this_application(tmp_path) -> None
         SQLiteLedger(path)
 
 
-def test_v1_database_receives_additive_result_and_control_migrations(tmp_path) -> None:
+@pytest.mark.parametrize("old_version", [1, 2, 3])
+def test_old_database_migrates_without_rewriting_snapshots(
+    tmp_path, app_config, old_version
+) -> None:
     from orchestrator.persistence.migrations import MIGRATIONS
 
     path = tmp_path / "legacy.sqlite3"
+    project, spec = _run_inputs(app_config)
+    legacy = spec.model_dump(mode="json", exclude={"snapshot_hash"})
+    legacy["workflow"]["policy"].pop("decision_questions")
+    legacy_hash = content_hash(canonical_json(legacy))
+    legacy["snapshot_hash"] = legacy_hash
+    legacy_payload = canonical_json(legacy)
     with sqlite3.connect(path) as connection:
-        MIGRATIONS[0][2](connection)
+        for version, name, migration in MIGRATIONS[:old_version]:
+            migration(connection)
+            connection.execute(
+                "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
+                (version, name, STAMP.isoformat()),
+            )
+        connection.execute(f"PRAGMA user_version = {old_version}")
         connection.execute(
-            "INSERT INTO schema_migrations(version, name, applied_at) VALUES (1, ?, ?)",
-            (MIGRATIONS[0][1], STAMP.isoformat()),
+            "INSERT INTO projects VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                project.id,
+                project.name,
+                project.path,
+                project.settings_revision,
+                STAMP.isoformat(),
+                STAMP.isoformat(),
+            ),
         )
-        connection.execute("PRAGMA user_version = 1")
+        payload = canonical_json(project)
+        connection.execute(
+            "INSERT INTO project_configs VALUES (?, ?, 1, ?, ?, ?)",
+            (
+                project.id,
+                project.settings_revision,
+                payload,
+                content_hash(payload),
+                STAMP.isoformat(),
+            ),
+        )
+        connection.execute(
+            "INSERT INTO run_specs VALUES (?, 1, ?, ?)",
+            (legacy_hash, legacy_payload, STAMP.isoformat()),
+        )
+        connection.execute(
+            "INSERT INTO runs(run_id, project_id, settings_revision, snapshot_hash, status, "
+            "revision, active_stages, attempts_used, elapsed_seconds, created_at, updated_at) "
+            "VALUES ('legacy', ?, ?, ?, 'ready', 0, '[]', 0, 0, ?, ?)",
+            (
+                project.id,
+                project.settings_revision,
+                legacy_hash,
+                STAMP.isoformat(),
+                STAMP.isoformat(),
+            ),
+        )
+        for stage in spec.workflow.stages:
+            connection.execute(
+                "INSERT INTO stages(run_id, stage_id, definition, status, updated_at) "
+                "VALUES ('legacy', ?, ?, 'pending', ?)",
+                (stage.id, canonical_json(stage), STAMP.isoformat()),
+            )
 
     with SQLiteLedger(path) as ledger:
         assert ledger.schema_version == 4
+        restored = ledger.get_run("legacy")
+        assert restored.spec.snapshot_hash == legacy_hash
+        assert restored.spec.workflow.policy.decision_questions == ()
+        assert restored.spec.task == spec.task
+        assert ledger.list_decision_records("legacy") == ()
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT payload FROM run_specs").fetchone()[0] == legacy_payload
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
     with sqlite3.connect(path) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(stages)").fetchall()}
         assert "result_payload" in columns
@@ -166,7 +225,24 @@ def test_v1_database_receives_additive_result_and_control_migrations(tmp_path) -
         }
 
 
-def test_decision_request_and_disposition_survive_reopen_write_once(tmp_path, app_config) -> None:
+@pytest.mark.parametrize(
+    "fixture_name",
+    [
+        "deterministic-policy",
+        "native-decision-model",
+        "general-llm-readout",
+        "generative-structured-output",
+    ],
+)
+def test_decision_request_and_disposition_survive_reopen_write_once(
+    tmp_path,
+    app_config,
+    repo_root,
+    fixture_name,
+) -> None:
+    fixture = DecisionResult.model_validate_json(
+        (repo_root / "tests" / "fixtures" / "decisions" / f"{fixture_name}.json").read_text()
+    )
     path = tmp_path / "decisions.sqlite3"
     with SQLiteLedger(path) as ledger:
         _create_run(ledger, app_config)
@@ -178,17 +254,16 @@ def test_decision_request_and_disposition_survive_reopen_write_once(tmp_path, ap
             question_revision="1",
             question="Choose an approved specialist.",
             allowed_outcomes=(
-                DecisionOption(outcome_id="reviewer", label="Reviewer"),
-                DecisionOption(outcome_id="planner", label="Planner"),
+                DecisionOption(outcome_id="prototype-implementer", label="Prototype implementer"),
+                DecisionOption(outcome_id="implementer", label="Implementer"),
             ),
-            inference_binding=DecisionInferenceBinding(
-                mechanism=DecisionMechanism.DETERMINISTIC_POLICY,
-                deterministic_policy_id="first_allowed_outcome",
-                deterministic_policy_revision="1",
-                deterministic_rule="first_allowed",
-            ),
+            inference_binding=fixture.effective_inference,
             acceptance_policy=DecisionAcceptancePolicy(
-                policy_id="typed_outcome", revision="1", mode="typed_outcome"
+                policy_id="typed_outcome",
+                revision="1",
+                mode="typed_outcome",
+                understood_score_semantics=("probability_distribution_v1",),
+                required_calibration=fixture.effective_inference.calibration,
             ),
             created_at=STAMP,
         )
@@ -209,26 +284,21 @@ def test_decision_request_and_disposition_survive_reopen_write_once(tmp_path, ap
                 decision_records=(pending,),
             )
         )
-        result = DecisionResult(
-            decision_id=request.decision_id,
-            effective_inference=request.inference_binding,
-            consumed_run_revision=0,
-            consumed_evidence_digest=request.evidence_digest,
-            outcome_id="reviewer",
+        result = fixture.model_copy(
+            update={
+                "decision_id": request.decision_id,
+                "consumed_run_revision": request.current_run_revision,
+                "consumed_evidence_digest": request.evidence_digest,
+            }
         )
-        disposition = DecisionDisposition(
-            decision_id=request.decision_id,
-            request_hash=pending.request_hash,
-            result_hash=decision_result_hash(result),
-            status=DecisionDispositionStatus.ACCEPTED,
-            policy_action=DecisionPolicyAction.CONTINUE,
-            reason=DecisionDispositionReason.ACCEPTED_TYPED_OUTCOME,
-            policy_id="typed_outcome",
-            policy_revision="1",
-            selected_outcome_id="reviewer",
-            resulting_run_revision=2,
+        disposition = evaluate_decision(
+            request,
+            result,
+            current_run_revision=0,
+            currently_allowed_outcomes={"prototype-implementer", "implementer"},
             evaluated_at=STAMP,
-        )
+        ).model_copy(update={"resulting_run_revision": 2})
+        assert disposition.status == DecisionDispositionStatus.ACCEPTED
         completed = pending.model_copy(
             update={"result": result, "disposition": disposition, "completed_at": STAMP}
         )

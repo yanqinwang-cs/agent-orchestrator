@@ -48,6 +48,7 @@ from orchestrator.domain.models import (
     SteerIntervention,
     StopAttemptIntervention,
     StopIntervention,
+    WorkflowPreset,
 )
 from orchestrator.execution import (
     ExecutionCoordinator,
@@ -66,6 +67,7 @@ from orchestrator.persistence.models import (
     StageUpdate,
 )
 from orchestrator.resolution import resolve_run
+from orchestrator.validation import validate_application
 
 STAMP = datetime(2026, 9, 29, tzinfo=UTC)
 OUTPUTS = {
@@ -321,6 +323,41 @@ async def test_bounded_decision_is_persisted_before_redirect_and_reused_after_re
 
 
 @pytest.mark.asyncio
+async def test_question_ids_do_not_collide_with_other_stage_ids(app_config, ledger_owner):
+    ledger, ownership = ledger_owner
+    data = next(item for item in app_config.workflows if item.id == "prototype").model_dump()
+    question = data["policy"]["decision_questions"][0]
+    later_question = dict(question, question_id="implement", stage_id="handoff")
+    data["policy"]["decision_questions"] = [later_question, question]
+    data["allowed_redirects"].append({"stage": "handoff", "allowed_profiles": ["handoff"]})
+    handoff = next(stage for stage in data["stages"] if stage["id"] == "handoff")
+    handoff["slot_kind"] = "select_one"
+    workflow = WorkflowPreset.model_validate(data)
+    validate_application(app_config.agents, [workflow], app_config.backends)
+    _create_run(ledger, app_config, "prototype", "question-collision", workflow=workflow)
+
+    def first_allowed(request):
+        return _decision_result(request, outcome_id=request.allowed_outcomes[0].outcome_id)
+
+    engine = FakeDecisionEngine((first_allowed, first_allowed))
+    coordinator, _backend, _clock = _coordinator(
+        ledger,
+        ownership,
+        factory=_worker_script,
+        decision_engine=engine,
+    )
+    assert await coordinator.run_until_stalled("question-collision") == RunStatus.SUCCEEDED
+    assert [request.question_id for request in engine.requests] == [
+        "implementer_choice",
+        "implement",
+    ]
+    assert [request.allowed_outcomes[0].outcome_id for request in engine.requests] == [
+        "prototype-implementer",
+        "handoff",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_explicit_profile_selection_is_preserved_without_semantic_rerouting(
     app_config, ledger_owner
 ) -> None:
@@ -489,6 +526,238 @@ async def test_missing_required_decision_evidence_fails_closed_without_engine_ca
     assert record.disposition.reason == DecisionDispositionReason.MISSING_EVIDENCE
     assert engine.requests == []
     assert backend.start_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reply_kind", ["result", "failure"])
+async def test_wrong_decision_identity_is_durably_rejected(app_config, ledger_owner, reply_kind):
+    ledger, ownership = ledger_owner
+    run_id = f"wrong-decision-{reply_kind}"
+    _create_run(ledger, app_config, "prototype", run_id)
+
+    def wrong_reply(request):
+        if reply_kind == "result":
+            return _decision_result(request).model_copy(update={"decision_id": uuid4()})
+        return DecisionEngineFailure(
+            decision_id=uuid4(),
+            classification="engine_error",
+            detail="Wrong request.",
+        )
+
+    engine = FakeDecisionEngine((wrong_reply,))
+    coordinator, backend, _clock = _coordinator(
+        ledger,
+        ownership,
+        factory=_worker_script,
+        decision_engine=engine,
+    )
+    assert await coordinator.run_until_stalled(run_id) == RunStatus.ATTENTION_REQUIRED
+    record = ledger.list_decision_records(run_id)[0]
+    assert record.disposition.reason == DecisionDispositionReason.INCOMPATIBLE_RESULT
+    assert record.completed_at is not None
+    assert ledger.get_stage_redirect(run_id, "implement") is None
+    assert len(backend.start_calls) == 1  # Only the prerequisite planner ran.
+    assert await coordinator.run_until_stalled(run_id) == RunStatus.ATTENTION_REQUIRED
+    assert len(engine.requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reply_kind", ["raw", "invalid_model", "incompatible"])
+async def test_malformed_engine_reply_never_dispatches_failure_fallback(
+    app_config,
+    ledger_owner,
+    reply_kind,
+):
+    ledger, ownership = ledger_owner
+    prototype = next(item for item in app_config.workflows if item.id == "prototype")
+    question = prototype.policy.decision_questions[0]
+    question = question.model_copy(
+        update={
+            "acceptance_policy": question.acceptance_policy.model_copy(
+                update={"on_engine_failure": "fallback", "fallback_outcome_id": "implementer"},
+            )
+        }
+    )
+    workflow = prototype.model_copy(
+        update={
+            "policy": prototype.policy.model_copy(update={"decision_questions": [question]}),
+        }
+    )
+    _create_run(ledger, app_config, "prototype", "invalid-fallback", workflow=workflow)
+
+    def invalid_reply(request):
+        if reply_kind == "raw":
+            return {"outcome_id": "implementer"}
+        if reply_kind == "invalid_model":
+            return _decision_result(request).model_copy(update={"outcome_id": None})
+        return DecisionEngineFailure(
+            decision_id=request.decision_id,
+            classification="incompatible_result",
+            detail="Bad schema.",
+        )
+
+    engine = FakeDecisionEngine((invalid_reply,))
+    coordinator, _backend, _clock = _coordinator(
+        ledger,
+        ownership,
+        factory=_worker_script,
+        decision_engine=engine,
+    )
+    assert await coordinator.run_until_stalled("invalid-fallback") == RunStatus.ATTENTION_REQUIRED
+    record = ledger.list_decision_records("invalid-fallback")[0]
+    assert record.disposition.status == DecisionDispositionStatus.REJECTED
+    assert record.failure is not None
+    assert ledger.list_attempts("invalid-fallback", "implement") == ()
+    assert ledger.get_stage_redirect("invalid-fallback", "implement") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["accepted", "abstained", "fallback", "pending"])
+async def test_decision_crash_boundaries_reopen_without_reinference(app_config, tmp_path, outcome):
+    path = tmp_path / "decision-restart.sqlite3"
+    prototype = next(item for item in app_config.workflows if item.id == "prototype")
+    question = prototype.policy.decision_questions[0]
+    if outcome == "fallback":
+        question = question.model_copy(
+            update={
+                "acceptance_policy": question.acceptance_policy.model_copy(
+                    update={
+                        "on_abstention": "fallback",
+                        "fallback_outcome_id": "implementer",
+                    }
+                ),
+            }
+        )
+    workflow = prototype.model_copy(
+        update={
+            "policy": prototype.policy.model_copy(update={"decision_questions": [question]}),
+        }
+    )
+    with SQLiteLedger(path) as ledger:
+        ownership = CoordinatorOwnership(ledger, tmp_path / "restart.lock")
+        ownership.acquire("before-restart", STAMP)
+        try:
+            _create_run(ledger, app_config, "prototype", "restart", workflow=workflow)
+            _complete_plan_before_decision(ledger, "restart")
+
+            def infer(request):
+                # A second connection must see the request before the engine responds.
+                with SQLiteLedger(path) as observer:
+                    assert observer.get_decision_record(request.decision_id).request == request
+                return _decision_result(request, abstained=outcome in {"abstained", "fallback"})
+
+            barrier = DecisionBarrier() if outcome == "pending" else None
+            engine = FakeDecisionEngine((infer,), barrier=barrier)
+            coordinator, backend, _clock = _coordinator(
+                ledger,
+                ownership,
+                factory=_worker_script,
+                decision_engine=engine,
+            )
+            task = asyncio.create_task(coordinator._process_ready_decisions("restart"))
+            if barrier is not None:
+                await barrier.entered.wait()
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            else:
+                assert await task
+            saved = ledger.list_decision_records("restart")[0]
+            assert backend.start_calls == []
+            assert len(engine.requests) == 1
+        finally:
+            ownership.release(STAMP)
+
+    with SQLiteLedger(path) as ledger:
+        ownership = CoordinatorOwnership(ledger, tmp_path / "restart.lock")
+        ownership.acquire("after-restart", STAMP)
+        try:
+            assert ledger.list_decision_records("restart") == (saved,)
+            engine = FakeDecisionEngine()
+            coordinator, backend, _clock = _coordinator(
+                ledger,
+                ownership,
+                factory=_worker_script,
+                decision_engine=engine,
+            )
+            expected = (
+                RunStatus.SUCCEEDED
+                if outcome in {"accepted", "fallback"}
+                else RunStatus.ATTENTION_REQUIRED
+            )
+            assert await coordinator.run_until_stalled("restart") == expected
+            record = ledger.list_decision_records("restart")[0]
+            assert record.request == saved.request
+            assert record.completed_at is not None
+            if outcome != "pending":
+                assert record == saved
+            else:
+                assert record.failure.classification.value == "engine_unavailable"
+            assert engine.requests == []
+            launches = list(backend.start_calls)
+            revision = ledger.get_run("restart").state.revision
+            assert await coordinator.run_until_stalled("restart") == expected
+            assert ledger.get_run("restart").state.revision == revision
+            assert backend.start_calls == launches
+        finally:
+            ownership.release(STAMP)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("branch", [None, "repair_not_needed", "repair_needed"])
+async def test_restarted_conditional_decision_requires_an_active_branch(
+    app_config, tmp_path, branch
+):
+    feature = next(item for item in app_config.workflows if item.id == "feature").model_dump()
+    prototype = next(item for item in app_config.workflows if item.id == "prototype")
+    question = prototype.policy.decision_questions[0].model_dump()
+    question.update(stage_id="repair", evidence_requirements=[question["evidence_requirements"][0]])
+    feature["policy"].update(allow_profile_selection=True, decision_questions=[question])
+    feature["allowed_redirects"] = [{"stage": "repair", "allowed_profiles": ["implementer"]}]
+    next(stage for stage in feature["stages"] if stage["id"] == "repair")["slot_kind"] = (
+        "select_one"
+    )
+    workflow = WorkflowPreset.model_validate(feature)
+    validate_application(app_config.agents, [workflow], app_config.backends)
+    path = tmp_path / "conditional.sqlite3"
+    with SQLiteLedger(path) as ledger:
+        _create_run(ledger, app_config, "feature", "conditional", workflow=workflow)
+        ledger.apply(
+            LedgerMutation(
+                command_id=uuid4(),
+                run_id="conditional",
+                expected_revision=0,
+                actor="test",
+                occurred_at=STAMP,
+                run_update=RunProjectionUpdate(status=RunStatus.RUNNING),
+                stage_updates=(
+                    StageUpdate(
+                        stage_id="repair_gate",
+                        status=StageStatus.SUCCEEDED,
+                        result=StageResult(decision=branch),
+                    ),
+                ),
+            )
+        )
+    with SQLiteLedger(path) as ledger:
+        ownership = CoordinatorOwnership(ledger, tmp_path / "conditional.lock")
+        ownership.acquire("restarted", STAMP)
+        try:
+            engine = FakeDecisionEngine((lambda request: _decision_result(request),))
+            coordinator, backend, _clock = _coordinator(
+                ledger,
+                ownership,
+                factory=_worker_script,
+                decision_engine=engine,
+            )
+            assert await coordinator._process_ready_decisions("conditional") == (
+                branch == "repair_needed"
+            )
+            assert len(engine.requests) == (1 if branch == "repair_needed" else 0)
+            assert len(ledger.list_decision_records("conditional")) == len(engine.requests)
+            assert backend.start_calls == []
+        finally:
+            ownership.release(STAMP)
 
 
 @pytest.mark.asyncio

@@ -29,7 +29,7 @@ flowchart TD
     UI[Local web UI: planned] --> API[Local API: planned]
     API --> Coordinator[Deterministic coordinator and SQLite ledger]
     Coordinator --> Resolver[Profile and workflow resolution]
-    Coordinator --> Decision[Optional bounded DecisionEngine: planned]
+    Coordinator --> Decision[Optional bounded DecisionEngine: deterministic/fake]
     Decision -->|typed result, no action authority| Coordinator
     Coordinator --> Context[ContextAssembler: planned]
     Coordinator --> Workspace[Git workspace manager: planned]
@@ -140,19 +140,21 @@ Codex mapping for the planned adapter: official `AsyncCodex` → `thread_start` 
 
 The Codex adapter must verify effective filesystem/network settings and ambient integrations. A prompt saying “only run tests” is not a shell-command whitelist. Mark tool intentions separately from enforced capabilities; unsupported mandatory restrictions fail preflight. Use a dedicated Codex home for app-managed harness settings, let Codex own its sign-in flow, and inspect trusted project configuration before execution. Do not implement custom OAuth or a credential database.
 
+<a id="decisionengine-planned-milestone-5"></a>
+
 ### DecisionEngine (implemented milestone 5)
 
 Use an optional semantic decision layer only when the choice cannot be expressed reliably with the declared deterministic rules. A `DecisionRequest` names one bounded question and contains only the selected evidence values with their persisted references/provenance, the allowed result shape and the current run revision. The engine sees no whole transcript and returns one narrow, versioned typed result. Examples include selecting an approved specialist, routing reviewer-versus-debugger, judging whether proposed tasks are independent enough for a declared parallel count, interpreting monitoring intent, or selecting an approved model tier.
 
 The engine has no action or tool authority. The coordinator checks that the run revision is still current and that every returned profile, route, count or binding is already permitted by the resolved topology, policy and budget. It then persists the result and provenance before dispatching any action. An invalid or stale result follows an explicit deterministic failure/attention path. A configured deterministic policy remains usable when no engine is selected. The engine never rewrites handoffs or supplies arbitrary workflow JSON.
 
-M5 adds the versioned bounded-decision contract, deterministic and fake inference paths, additive SQLite persistence, and coordinator validation before dispatch. Its offline fixtures cover four inference shapes. The Prototype workflow applies a specialist choice within its declared redirect allowlist. Plan evidence is persisted by identity and hash, but its content is not assembled into inference requests. No live model routing or provider is integrated.
+M5 adds the versioned bounded-decision contract, deterministic and fake inference paths, additive SQLite persistence, and coordinator validation before dispatch. Its offline fixtures cover four inference shapes. The Prototype workflow applies a specialist choice within its declared redirect allowlist. Evidence identifies the source stage/output and content hash; its body is not assembled into the request, so a future text-based inference adapter needs an approved evidence-content contract. Only active conditional branches request inference. Explicit abstention may omit scores under either acceptance mode; any supplied scores still require compatible semantics. Malformed or incompatible replies require attention even when an engine-failure fallback is configured. Wrong-request identities are retained in a classified incompatible failure rather than aborting persistence. No live model routing or provider is integrated.
 
 ### Handoffs
 
 A handoff is a structured transfer of persisted artifact IDs/hashes, selected revision, input lineage and open issues. The coordinator selects or receives an approved destination, validates it, assembles that destination's bounded context deterministically, then launches it. A model-generated summary is an explicit synthesis output when a workflow needs one; routine handoffs do not need a manager model to rewrite the record.
 
-The scripted fake backend uses a manual clock and explicit start/event/control barriers, so scheduler tests do not depend on wall-clock sleeps. Static validation checks declared branches and output bindings; the coordinator executes those gates from persisted results. The backend remains fake-only through milestone 4.
+The scripted fake backend uses a manual clock and explicit start/event/control barriers, so scheduler tests do not depend on wall-clock sleeps. Static validation checks declared branches and output bindings; the coordinator executes those gates from persisted results. Worker execution remains fake-only through milestone 5.
 
 ## 5. State, scheduling and persistence
 
@@ -171,6 +173,8 @@ Use tables for projects/config revisions, runs, stages, immutable attempt specs,
 Milestone 3 adds schema-v2 immutable normalized attempt results and stage output projections to SQLite. `ExecutionCoordinator` uses the resolved policy and topology to advance deterministic gates, creates launch attempts/reservations/outbox intents in one transaction, then calls the backend and records acknowledgement outside that transaction. On restart, Milestone 4 inspects ambiguous worker identities and settles only evidenced terminal outcomes.
 
 Milestone 4 adds additive schema-v3 run attention fields, versioned intervention/delivery receipts and declared stage redirects. Pause inhibits launches while active work drains; stop and selected-stop use exact persisted worker identities, interruption acknowledgements and bounded close; steer carries an acknowledged effective input revision; retry creates a child attempt under the existing policy; redirect uses a candidate profile frozen into the resolved run snapshot. Recovery never replays a claimed launch or control. Known terminal inspection releases capacity; missing, running or otherwise ambiguous evidence retains reservations and puts the run in `attention_required`. The fake can script acknowledged/rejected/unsupported/unknown controls, barriers and reconciliation outcomes. No active process reattachment is promised and no Codex adapter exists yet.
+
+Milestone 5 adds additive schema-v4 decision records. Request persistence precedes inference outside the transaction; the normalized reply, deterministic disposition, events and approved redirect commit together before worker dispatch. Settled decisions survive restart without re-inference. An interrupted pending decision is settled as an engine-unavailable failure under its frozen policy, with stale revisions rejected. A redirect already committed with its disposition is an applied action; subsequent ordinary scheduling revisions do not repeat inference. Stage/output evidence is checked against the target stage’s ancestry.
 
 On restart, reconstruct state from committed projections/events and durable receipts, not by replaying worker actions. Reuse verified completed results. Reconcile through the selected runtime's documented identity/history surface; active-process reattachment is not promised. The Codex adapter may inspect known thread/turn history, but that does not establish process reattachment. Unknown attempts retain reservations until ownership is settled and any workspace is inspected. A PID alone is insufficient proof. A timeout requests interruption and bounded shutdown; if death cannot be established, preserve `outcome_unknown` instead of falsely releasing ownership.
 
@@ -217,7 +221,7 @@ The TOML condition vocabulary is closed: `always`, `repair_needed`, `repair_not_
 
 The current closed `StageKind` values are `worker`, `integrate`, `integration_check` and `repair_gate`. They represent all six shipped M1–M3 workflows: agent execution, deterministic integration/check actions, and a deterministic repair gate. `StageCompletion` also has `decision_recorded`, but that value alone does not define a bounded semantic question, allowed outcomes or a typed decision result. Human controls are intervention commands, not workflow stages.
 
-This schema is adequate for current workflows. Do not change it before milestone 4. Before milestone 5, add a versioned `DecisionRequest`/`DecisionResult` contract and decide whether the result should be its own `semantic_decision` stage kind or a persisted decision record on an existing gate. If a first-class stage is needed, introduce it as a versioned workflow/resolved-run schema change: new readers accept old snapshots unchanged, old v1 run specs remain immutable, and new decision stages require an explicit migration/compatibility policy. Consider a `human_gate` only if a workflow needs a durable wait-for-human node; ordinary pause, steer, retry and redirect remain intervention events. No such schema change is implemented here.
+M5 keeps the existing stage kinds and persists semantic decisions as independent backend records configured by versioned questions in the resolved policy. The narrow integration permits one redirect decision per select-one stage; duplicate stage questions fail configuration validation. Question IDs and stage IDs have separate lookup scopes. No new workflow stage or UI representation is needed. Old snapshots without decision questions remain readable and unchanged. A future first-class decision or human-gate stage requires a demonstrated workflow need and an explicit schema/compatibility decision; ordinary pause, steer, retry and redirect remain intervention events.
 
 ## 8. UI and local operation
 
@@ -264,4 +268,4 @@ SDK fixtures must record their SDK/CLI versions and contain no credentials. Opti
 | **9. Native model runtime and provider abstraction** | Add a project-owned tool/context/stop loop behind the common contract, with a Bedrock-backed runtime first; permit approved provider and local-model bindings. | Tool calls, policy enforcement, result filtering and stopping are deterministic at the boundary; model-controlled and full-system evaluations remain distinguishable. | 5, 7 |
 | **10. Installable personal release** | Packaging, operation/recovery guide, exportable handoff, offline CI, compatibility notes, bounded logging and uninstall/data guidance. | Fresh macOS install from lock; deterministic CI; restart/control path documented; one-command local launch works. | 8, 9 |
 
-Keep each milestone independently reviewable. The task files in `tasks/` preserve the acceptance scope of milestones 1–4; their historical stop conditions do not change this current roadmap.
+Keep each milestone independently reviewable. The task files in `tasks/` preserve the acceptance scope of milestones 1–5; their historical stop conditions do not change this current roadmap.

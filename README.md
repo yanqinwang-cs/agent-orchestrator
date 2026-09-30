@@ -4,13 +4,13 @@ Agent Orchestrator is a local-first, inspectable harness for running reusable sp
 
 It is a personal open-source developer tool. Success means practical usefulness, user control, inspectability, reproducibility, flexibility and strong engineering quality.
 
-Milestones 1–3 are complete: typed configuration, deterministic run resolution, versioned JSON Schemas, the SQLite ledger, and an offline coordinator for all six shipped workflows using scripted fake workers. The deterministic coordinator and ledger remain authoritative for workflow progression, policy, concurrency, retries, handoffs and persisted state. A bounded `DecisionEngine` is planned for milestone 5; it may return typed recommendations, while the coordinator validates and executes them.
+Milestones 1–5 are complete: typed configuration, deterministic run resolution, versioned JSON Schemas, the SQLite ledger, an offline coordinator for all six shipped workflows, runtime controls/recovery, and bounded semantic decision infrastructure. The coordinator and ledger remain authoritative for workflow progression, policy, concurrency, retries, handoffs and persisted state. The provider-neutral `DecisionEngine` returns bounded results; deterministic policy validates them and the coordinator executes any permitted action. Only deterministic and scripted fake inference engines are implemented.
 
 Codex is planned as the first real worker backend because it fits the existing subscription-backed workflow. The current runtime implements only the fake backend; it does not yet launch Codex, create project worktrees or provide a web UI. See the [implementation plan](docs/IMPLEMENTATION_PLAN.md) for target architecture, contracts and the ten-milestone roadmap, and the [integration audit](docs/INTEGRATION_AUDIT.md) for Codex evidence and integration limits.
 
 ## Set up and validate
 
-Use Python 3.12+ and [uv](https://docs.astral.sh/uv/getting-started/installation/). SQLite comes with Python. The completed first three milestones need no Node, Codex sign-in or live model access.
+Use Python 3.12+ and [uv](https://docs.astral.sh/uv/getting-started/installation/). SQLite comes with Python. The completed first five milestones need no Node, Codex sign-in or live model access.
 
 Install the locked development dependencies and validate the shipped configuration:
 
@@ -60,9 +60,9 @@ Product `AgentProfile` records currently carry a default backend and model-bindi
 
 ## Durable storage
 
-`SQLiteLedger` owns a versioned SQLite database with foreign keys, WAL mode, full synchronous commits and a configurable busy timeout. One revision-checked transaction writes projections, attributable events, command receipts, reservations and outbox intent together. Resolved run and attempt specifications and project configuration revisions are content-addressed immutable records. Schema v2 also preserves normalized worker results and completed stage outputs so joins and repair decisions can be reconstructed after reopen.
+`SQLiteLedger` owns a versioned SQLite database with foreign keys, WAL mode, full synchronous commits and a configurable busy timeout. One revision-checked transaction writes projections, attributable events, command receipts, reservations and outbox intent together. Resolved run and attempt specifications and project configuration revisions are content-addressed immutable records. Additive migrations preserve worker results and stage outputs (v2), control receipts and attention state (v3), and immutable decision requests with write-once replies/dispositions (v4).
 
-`CoordinatorOwnership` combines an OS file lock with a persisted owner generation. `claim_next_outbox` marks an action claimed before any later dispatcher performs an external effect. A claimed action stays distinguishable from pending after restart and is not blindly selected again; reconciliation is a later milestone. `ArtifactStore` writes and hashes bytes under `runs/<run>/attempts/<attempt>/artifacts/`, atomically renames the completed file, then commits its manifest and event. A crash between rename and the SQLite commit can leave an unreferenced content-addressed file, but cannot publish a manifest for incomplete bytes.
+`CoordinatorOwnership` combines an OS file lock with a persisted owner generation. `claim_next_outbox` marks an action claimed before any later dispatcher performs an external effect. A claimed action stays distinguishable from pending after restart and is not blindly selected again; fake-backed reconciliation settles evidenced terminal outcomes and retains unknown ownership for attention. `ArtifactStore` writes and hashes bytes under `runs/<run>/attempts/<attempt>/artifacts/`, atomically renames the completed file, then commits its manifest and event. A crash between rename and the SQLite commit can leave an unreferenced content-addressed file, but cannot publish a manifest for incomplete bytes.
 
 ## Bounded fake execution
 

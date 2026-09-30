@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from orchestrator.config import ConfigLoadError, load_shipped_configuration, validate_config_file
+from orchestrator.domain.decisions import DecisionEvidenceRequirement
 from orchestrator.domain.models import PermissionSet, SandboxMode, WorkflowCompletion
 from orchestrator.validation import ConfigValidationError, validate_application
 
@@ -50,6 +51,55 @@ def test_dependency_cycle_is_rejected(app_config) -> None:
             app_config.backends,
             app_config.project.model_copy(update={"allowed_workflows": ["review"]}),
         )
+
+
+@pytest.mark.parametrize("source,output", [("implement", "changes"), ("validate", "report")])
+def test_decision_evidence_cannot_depend_on_its_target_or_downstream(app_config, source, output):
+    prototype = next(item for item in app_config.workflows if item.id == "prototype")
+    question = prototype.policy.decision_questions[0].model_copy(
+        update={
+            "evidence_requirements": (
+                DecisionEvidenceRequirement(
+                    kind="stage_output",
+                    stage_id=source,
+                    output_name=output,
+                    inclusion_reason="Evidence must exist before choosing the recipient.",
+                ),
+            ),
+        }
+    )
+    workflow = prototype.model_copy(
+        update={
+            "policy": prototype.policy.model_copy(update={"decision_questions": [question]}),
+        }
+    )
+    with pytest.raises(ConfigValidationError, match="not an ancestor of the decision stage"):
+        validate_application(app_config.agents, [workflow], app_config.backends)
+
+
+def test_decision_evidence_validation_is_independent_of_stage_declaration_order(app_config):
+    prototype = next(item for item in app_config.workflows if item.id == "prototype")
+    reordered = prototype.model_copy(update={"stages": list(reversed(prototype.stages))})
+    validate_application(app_config.agents, [reordered], app_config.backends)
+
+
+def test_multiple_decisions_for_one_redirect_are_rejected(app_config):
+    prototype = next(item for item in app_config.workflows if item.id == "prototype")
+    question = prototype.policy.decision_questions[0]
+    workflow = prototype.model_copy(
+        update={
+            "policy": prototype.policy.model_copy(
+                update={
+                    "decision_questions": [
+                        question,
+                        question.model_copy(update={"question_id": "another_choice"}),
+                    ],
+                }
+            )
+        }
+    )
+    with pytest.raises(ConfigValidationError, match="one redirect decision per stage"):
+        validate_application(app_config.agents, [workflow], app_config.backends)
 
 
 def test_missing_input_output_binding_is_rejected(app_config) -> None:

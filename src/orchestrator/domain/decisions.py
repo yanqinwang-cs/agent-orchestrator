@@ -580,6 +580,10 @@ def evaluate_decision(
     if isinstance(reply, DecisionEngineFailure):
         if reply.decision_id != request.decision_id:
             return invalid(DecisionDispositionReason.INCOMPATIBLE_RESULT)
+        if reply.classification == DecisionFailureClass.MALFORMED_RESULT:
+            return invalid(DecisionDispositionReason.MALFORMED_RESULT)
+        if reply.classification == DecisionFailureClass.INCOMPATIBLE_RESULT:
+            return invalid(DecisionDispositionReason.INCOMPATIBLE_RESULT)
         if reply.classification == DecisionFailureClass.MISSING_EVIDENCE:
             return disposition(
                 DecisionDispositionStatus.ATTENTION_REQUIRED,
@@ -656,11 +660,14 @@ def evaluate_decision(
             )
             if reply.outcome_id is not None and reply.outcome_id != selected_from_scores:
                 return invalid(DecisionDispositionReason.SCORE_MAPPING_MISMATCH)
-            if score_by_outcome[selected_from_scores] < policy.minimum_score:
+            if (
+                not reply.abstained
+                and score_by_outcome[selected_from_scores] < policy.minimum_score
+            ):
                 return abstain(DecisionDispositionReason.SCORE_BELOW_THRESHOLD)
-        elif reply.outcome_id is None:
+        elif reply.outcome_id is None and not reply.abstained:
             return invalid(DecisionDispositionReason.SCORE_MAPPING_MISMATCH)
-    elif policy.mode == "score_threshold":
+    elif policy.mode == "score_threshold" and not reply.abstained:
         return invalid(DecisionDispositionReason.SCORE_MAPPING_MISMATCH)
 
     if reply.abstained:

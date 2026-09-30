@@ -14,7 +14,9 @@ from orchestrator.domain.decisions import (
     DecisionAcceptancePolicy,
     DecisionDispositionReason,
     DecisionDispositionStatus,
+    DecisionEngineFailure,
     DecisionEvidence,
+    DecisionFailureClass,
     DecisionInferenceBinding,
     DecisionMechanism,
     DecisionOption,
@@ -407,6 +409,79 @@ def test_explicit_abstention_uses_only_the_declared_fallback() -> None:
     assert disposition.status == DecisionDispositionStatus.FALLBACK
     assert disposition.selected_outcome_id == "prototype-implementer"
     assert disposition.reason == DecisionDispositionReason.EXPLICIT_ABSTENTION
+
+
+@pytest.mark.parametrize("mode", ["typed_outcome", "score_threshold"])
+@pytest.mark.parametrize("on_abstention", ["attention_required", "fallback"])
+def test_scoreless_abstention_obeys_policy(mode, on_abstention) -> None:
+    policy = DecisionAcceptancePolicy(
+        policy_id="abstention-policy",
+        revision="1",
+        mode=mode,
+        understood_score_semantics=("probability_distribution_v1",),
+        required_score_semantics="probability_distribution_v1"
+        if mode == "score_threshold"
+        else None,
+        required_score_scale="unit_interval" if mode == "score_threshold" else None,
+        minimum_score=0.7 if mode == "score_threshold" else None,
+        on_abstention=on_abstention,
+        fallback_outcome_id="implementer" if on_abstention == "fallback" else None,
+    )
+    request = _request(acceptance_policy=policy)
+    reply = DecisionResult(
+        decision_id=request.decision_id,
+        effective_inference=request.inference_binding,
+        consumed_run_revision=request.current_run_revision,
+        consumed_evidence_digest=request.evidence_digest,
+        abstained=True,
+        abstention_reason="Insufficient evidence to choose.",
+    )
+    disposition = evaluate_decision(
+        request,
+        reply,
+        current_run_revision=7,
+        currently_allowed_outcomes={"prototype-implementer", "implementer"},
+        evaluated_at=request.created_at,
+    )
+    assert disposition.reason == DecisionDispositionReason.EXPLICIT_ABSTENTION
+    assert disposition.status == (
+        DecisionDispositionStatus.FALLBACK
+        if on_abstention == "fallback"
+        else DecisionDispositionStatus.ABSTAINED
+    )
+
+
+@pytest.mark.parametrize(
+    "classification",
+    [
+        DecisionFailureClass.MALFORMED_RESULT,
+        DecisionFailureClass.INCOMPATIBLE_RESULT,
+    ],
+)
+def test_invalid_reply_cannot_use_engine_failure_fallback(classification) -> None:
+    request = _request(
+        acceptance_policy=DecisionAcceptancePolicy(
+            policy_id="failure-fallback",
+            revision="1",
+            mode="typed_outcome",
+            on_engine_failure="fallback",
+            fallback_outcome_id="implementer",
+        )
+    )
+    disposition = evaluate_decision(
+        request,
+        DecisionEngineFailure(
+            decision_id=request.decision_id,
+            classification=classification,
+            detail="Invalid adapter response.",
+        ),
+        current_run_revision=7,
+        currently_allowed_outcomes={"prototype-implementer", "implementer"},
+        evaluated_at=request.created_at,
+    )
+    assert disposition.status == DecisionDispositionStatus.REJECTED
+    assert disposition.reason.value == classification.value
+    assert disposition.selected_outcome_id is None
 
 
 def test_malformed_and_disallowed_results_never_become_accepted() -> None:

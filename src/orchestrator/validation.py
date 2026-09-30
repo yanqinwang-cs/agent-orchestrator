@@ -257,11 +257,17 @@ def _validate_workflow(
 
     redirect_by_stage = {item.stage: item for item in workflow.allowed_redirects}
     question_ids: set[str] = set()
+    decision_stage_ids: set[str] = set()
     for question in workflow.policy.decision_questions:
         path = f"{base}.policy.decision_questions.{question.question_id}"
         if question.question_id in question_ids:
             issues.append(ValidationIssue(path, "duplicate decision question ID"))
         question_ids.add(question.question_id)
+        if question.stage_id in decision_stage_ids:
+            issues.append(
+                ValidationIssue(path + ".stage_id", "only one redirect decision per stage")
+            )
+        decision_stage_ids.add(question.stage_id)
         decision_stage = stages.get(question.stage_id)
         if (
             decision_stage is None
@@ -314,7 +320,7 @@ def _validate_workflow(
                         f"unknown required stage output {requirement.source_ref!r}",
                     )
                 )
-            elif source_id not in ancestry.get(stage.id, set()):
+            elif source_id not in ancestry.get(decision_stage.id, set()):
                 issues.append(
                     ValidationIssue(
                         path + ".evidence_requirements",
