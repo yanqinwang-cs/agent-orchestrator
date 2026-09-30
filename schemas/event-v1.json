@@ -385,6 +385,170 @@
       "title": "AttemptStatusChangedEvent",
       "type": "object"
     },
+    "DecisionLifecycleEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "minLength": 1,
+          "title": "Actor",
+          "type": "string"
+        },
+        "cause_event_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cause Event Id"
+        },
+        "decision_id": {
+          "format": "uuid",
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "disposition_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Status"
+        },
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "decision_requested",
+            "decision_inference_started",
+            "decision_result_recorded",
+            "decision_inference_failed",
+            "decision_result_rejected",
+            "decision_result_stale",
+            "decision_result_disallowed",
+            "decision_abstained",
+            "decision_policy_evaluated",
+            "decision_accepted",
+            "decision_fallback",
+            "decision_attention_required"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "outcome_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outcome Id"
+        },
+        "question_id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Question Id",
+          "type": "string"
+        },
+        "request_hash": {
+          "title": "Request Hash",
+          "type": "string"
+        },
+        "result_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Result Hash"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "sequence": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sequence"
+        }
+      },
+      "required": [
+        "event_id",
+        "run_id",
+        "occurred_at",
+        "actor",
+        "kind",
+        "decision_id",
+        "question_id",
+        "request_hash"
+      ],
+      "title": "DecisionLifecycleEvent",
+      "type": "object"
+    },
     "Handoff": {
       "additionalProperties": false,
       "properties": {
@@ -2016,6 +2180,18 @@
       "artifact_recorded": "#/$defs/ArtifactRecordedEvent",
       "attempt_result_recorded": "#/$defs/AttemptResultRecordedEvent",
       "attempt_status_changed": "#/$defs/AttemptStatusChangedEvent",
+      "decision_abstained": "#/$defs/DecisionLifecycleEvent",
+      "decision_accepted": "#/$defs/DecisionLifecycleEvent",
+      "decision_attention_required": "#/$defs/DecisionLifecycleEvent",
+      "decision_fallback": "#/$defs/DecisionLifecycleEvent",
+      "decision_inference_failed": "#/$defs/DecisionLifecycleEvent",
+      "decision_inference_started": "#/$defs/DecisionLifecycleEvent",
+      "decision_policy_evaluated": "#/$defs/DecisionLifecycleEvent",
+      "decision_requested": "#/$defs/DecisionLifecycleEvent",
+      "decision_result_disallowed": "#/$defs/DecisionLifecycleEvent",
+      "decision_result_recorded": "#/$defs/DecisionLifecycleEvent",
+      "decision_result_rejected": "#/$defs/DecisionLifecycleEvent",
+      "decision_result_stale": "#/$defs/DecisionLifecycleEvent",
       "handoff_recorded": "#/$defs/HandoffRecordedEvent",
       "intervention_delivered": "#/$defs/InterventionDeliveredEvent",
       "intervention_delivery_acknowledged": "#/$defs/InterventionLifecycleEvent",
@@ -2074,6 +2250,9 @@
     },
     {
       "$ref": "#/$defs/HandoffRecordedEvent"
+    },
+    {
+      "$ref": "#/$defs/DecisionLifecycleEvent"
     }
   ]
 }

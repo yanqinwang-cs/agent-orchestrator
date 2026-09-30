@@ -9,6 +9,7 @@ from orchestrator.domain.models import (
     ModelBindingSettings,
     ProfileOverlay,
     ProfileOverlayFile,
+    ResolvedOrchestratorPolicy,
     RunOverrides,
     WorkflowOverlay,
 )
@@ -186,3 +187,36 @@ def test_profile_selection_is_limited_to_declared_recipients(app_config) -> None
             model_availability=_availability(),
             overrides=RunOverrides(profile_selections={"implement": "reviewer"}),
         )
+
+
+def test_resolved_run_preserves_explicit_semantic_decision_configuration(app_config) -> None:
+    prototype = next(workflow for workflow in app_config.workflows if workflow.id == "prototype")
+    assert prototype.policy.decision_questions
+
+    spec = resolve_run(
+        "Choose an approved implementation specialist",
+        _project_with_models(app_config),
+        prototype,
+        app_config.agents.agents,
+        model_availability=_availability(),
+    )
+
+    question = spec.workflow.policy.decision_questions[0]
+    redirect = next(item for item in spec.workflow.allowed_redirects if item.stage == "implement")
+    assert question.question_id == "implementer_choice"
+    assert question.inference_binding.mechanism.value == "deterministic_policy"
+    assert tuple(item.source_ref for item in question.evidence_requirements) == (
+        "run.task",
+        "plan.plan",
+    )
+    assert redirect.allowed_profiles == ("prototype-implementer", "implementer")
+
+
+def test_pre_m5_resolved_policy_payload_remains_readable(app_config) -> None:
+    spec = _resolve(app_config)
+    legacy_payload = spec.workflow.policy.model_dump(mode="json")
+    legacy_payload.pop("decision_questions")
+
+    restored = ResolvedOrchestratorPolicy.model_validate(legacy_payload)
+
+    assert restored == spec.workflow.policy.model_copy(update={"decision_questions": ()})

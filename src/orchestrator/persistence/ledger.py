@@ -54,6 +54,7 @@ from orchestrator.persistence.models import (
     AttemptResultRegistration,
     CommandOutcome,
     CommandReceipt,
+    DecisionRecord,
     InterventionRecord,
     LedgerMutation,
     OutboxAction,
@@ -772,6 +773,8 @@ class SQLiteLedger:
 
             for record in mutation.intervention_records:
                 self._upsert_intervention_record(connection, record)
+            for decision_record in mutation.decision_records:
+                self._upsert_decision_record(connection, mutation, decision_record)
             for redirect in mutation.stage_redirects:
                 self._upsert_stage_redirect(connection, redirect)
             for event in mutation.events:
@@ -1412,6 +1415,68 @@ class SQLiteLedger:
             ),
         )
 
+    def _upsert_decision_record(
+        self,
+        connection: sqlite3.Connection,
+        mutation: LedgerMutation,
+        record: DecisionRecord,
+    ) -> None:
+        if record.run_id != mutation.run_id:
+            raise LedgerInvariantError("decision record belongs to another run")
+        decision_id = str(record.decision_id)
+        existing = connection.execute(
+            "SELECT record_payload, request_payload, request_hash, request_persisted_revision "
+            "FROM decision_records WHERE decision_id = ?",
+            (decision_id,),
+        ).fetchone()
+        record_payload = canonical_json(record)
+        request_payload = canonical_json(record.request)
+        if existing is None:
+            if record.completed_at is not None:
+                raise LedgerInvariantError("decision request must be persisted before its reply")
+            if mutation.expected_revision != record.request.current_run_revision:
+                raise LedgerInvariantError(
+                    "decision request was not created at the current revision"
+                )
+            if record.request_persisted_revision != mutation.expected_revision + 1:
+                raise LedgerInvariantError(
+                    "decision request persistence revision is not consecutive"
+                )
+            connection.execute(
+                "INSERT INTO decision_records(decision_id, run_id, question_id, schema_version, "
+                "request_payload, request_hash, request_persisted_revision, record_payload, "
+                "created_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+                (
+                    decision_id,
+                    mutation.run_id,
+                    record.question_id,
+                    record.schema_version,
+                    request_payload,
+                    record.request_hash,
+                    record.request_persisted_revision,
+                    record_payload,
+                    _iso(record.created_at),
+                ),
+            )
+            return
+
+        prior = DecisionRecord.model_validate(json.loads(existing["record_payload"]))
+        if (
+            existing["request_payload"] != request_payload
+            or existing["request_hash"] != record.request_hash
+            or existing["request_persisted_revision"] != record.request_persisted_revision
+            or prior.request != record.request
+            or prior.created_at != record.created_at
+        ):
+            raise ImmutableSpecificationConflict("decision identity was reused for another request")
+        if prior.completed_at is not None or record.completed_at is None:
+            raise LedgerInvariantError("decision reply and disposition are write-once")
+        connection.execute(
+            "UPDATE decision_records SET record_payload = ?, completed_at = ? "
+            "WHERE decision_id = ?",
+            (record_payload, _iso(record.completed_at), decision_id),
+        )
+
     def _state_from_row(self, row: sqlite3.Row) -> RunState:
         return RunState(
             run_id=row["run_id"],
@@ -1471,6 +1536,7 @@ class SQLiteLedger:
             or mutation.artifacts
             or mutation.intervention_records
             or mutation.stage_redirects
+            or mutation.decision_records
         ):
             return False
         for change in mutation.outbox_outcomes:
@@ -1531,6 +1597,32 @@ class SQLiteLedger:
             ).fetchall()
             return tuple(EVENT_ADAPTER.validate_python(json.loads(row["payload"])) for row in rows)
 
+    def get_decision_record(self, decision_id: UUID | str) -> DecisionRecord:
+        with self._read_transaction() as connection:
+            row = connection.execute(
+                "SELECT record_payload FROM decision_records WHERE decision_id = ?",
+                (str(decision_id),),
+            ).fetchone()
+            if row is None:
+                raise KeyError(str(decision_id))
+            return DecisionRecord.model_validate(json.loads(row["record_payload"]))
+
+    def list_decision_records(self, run_id: str) -> tuple[DecisionRecord, ...]:
+        with self._read_transaction() as connection:
+            if (
+                connection.execute("SELECT 1 FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+                is None
+            ):
+                raise RunNotFound(run_id)
+            rows = connection.execute(
+                "SELECT record_payload FROM decision_records WHERE run_id = ? "
+                "ORDER BY created_at, decision_id",
+                (run_id,),
+            ).fetchall()
+            return tuple(
+                DecisionRecord.model_validate(json.loads(row["record_payload"])) for row in rows
+            )
+
     def list_interventions(self, run_id: str) -> tuple[Intervention, ...]:
         adapter: TypeAdapter[Intervention] = TypeAdapter(Intervention)
         with self._read_transaction() as connection:
@@ -1553,13 +1645,26 @@ class SQLiteLedger:
             )
 
     def get_stage_redirect(self, run_id: str, stage_id: str) -> str | None:
+        redirect = self.get_stage_redirect_record(run_id, stage_id)
+        return redirect.recipient_profile_id if redirect is not None else None
+
+    def get_stage_redirect_record(self, run_id: str, stage_id: str) -> StageRedirect | None:
         with self._read_transaction() as connection:
             row = connection.execute(
-                "SELECT recipient_profile_id FROM stage_redirects "
+                "SELECT run_id, stage_id, recipient_profile_id, command_id, updated_at "
+                "FROM stage_redirects "
                 "WHERE run_id = ? AND stage_id = ?",
                 (run_id, stage_id),
             ).fetchone()
-            return row["recipient_profile_id"] if row is not None else None
+            if row is None:
+                return None
+            return StageRedirect(
+                run_id=row["run_id"],
+                stage_id=row["stage_id"],
+                recipient_profile_id=row["recipient_profile_id"],
+                command_id=UUID(row["command_id"]),
+                updated_at=datetime.fromisoformat(row["updated_at"]),
+            )
 
     def list_handoffs(self, run_id: str) -> tuple[Handoff, ...]:
         with self._read_transaction() as connection:

@@ -23,6 +23,40 @@ allow_permission_expansion = false
 allow_new_profiles = false
 allow_required_stage_removal = false
 
+[[policy.decision_questions]]
+schema_version = 1
+question_id = "implementer_choice"
+revision = "1"
+action = "redirect_select_one"
+stage_id = "implement"
+question = "Choose the approved implementation specialist for the declared task and plan."
+
+[[policy.decision_questions.evidence_requirements]]
+kind = "run_task"
+inclusion_reason = "The declared task defines the implementation objective."
+
+[[policy.decision_questions.evidence_requirements]]
+kind = "stage_output"
+stage_id = "plan"
+output_name = "plan"
+inclusion_reason = "The completed plan constrains specialist selection."
+
+[policy.decision_questions.inference_binding]
+schema_version = 1
+mechanism = "deterministic_policy"
+deterministic_policy_id = "first_allowed_outcome"
+deterministic_policy_revision = "1"
+deterministic_rule = "first_allowed"
+
+[policy.decision_questions.acceptance_policy]
+schema_version = 1
+policy_id = "typed_outcome"
+revision = "1"
+mode = "typed_outcome"
+understood_score_semantics = []
+on_abstention = "attention_required"
+on_engine_failure = "attention_required"
+
 [[stages]]
 id = "plan"
 kind = "worker"

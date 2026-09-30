@@ -1,0 +1,61 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "content_hash": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Content Hash",
+      "type": "string"
+    },
+    "current_run_revision": {
+      "minimum": 0,
+      "title": "Current Run Revision",
+      "type": "integer"
+    },
+    "inclusion_reason": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Inclusion Reason",
+      "type": "string"
+    },
+    "order": {
+      "minimum": 0,
+      "title": "Order",
+      "type": "integer"
+    },
+    "source_ref": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Source Ref",
+      "type": "string"
+    },
+    "source_revision": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Source Revision",
+      "type": "string"
+    },
+    "value": {
+      "anyOf": [
+        {
+          "maxLength": 16384,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Value"
+    }
+  },
+  "required": [
+    "source_ref",
+    "source_revision",
+    "content_hash",
+    "inclusion_reason",
+    "order",
+    "current_run_revision"
+  ],
+  "title": "DecisionEvidence",
+  "type": "object"
+}

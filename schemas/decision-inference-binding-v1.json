@@ -1,0 +1,265 @@
+{
+  "$defs": {
+    "CalibrationIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "content_hash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "revision": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Revision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "revision",
+        "content_hash"
+      ],
+      "title": "CalibrationIdentity",
+      "type": "object"
+    },
+    "DecisionMechanism": {
+      "enum": [
+        "deterministic_policy",
+        "native_decision_model",
+        "general_llm_readout",
+        "generative_structured_output"
+      ],
+      "title": "DecisionMechanism",
+      "type": "string"
+    },
+    "InferenceStateIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "content_hash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "revision": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Revision",
+          "type": "string"
+        },
+        "state_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "State Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state_id",
+        "revision",
+        "content_hash"
+      ],
+      "title": "InferenceStateIdentity",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Frozen identity for one inference mechanism, without provider SDK objects.",
+  "properties": {
+    "adapter_id": {
+      "anyOf": [
+        {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Adapter Id"
+    },
+    "adapter_revision": {
+      "anyOf": [
+        {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Adapter Revision"
+    },
+    "base_model_id": {
+      "anyOf": [
+        {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Base Model Id"
+    },
+    "base_model_revision": {
+      "anyOf": [
+        {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Base Model Revision"
+    },
+    "calibration": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CalibrationIdentity"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "decision_model_id": {
+      "anyOf": [
+        {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Decision Model Id"
+    },
+    "decision_model_revision": {
+      "anyOf": [
+        {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Decision Model Revision"
+    },
+    "deterministic_policy_id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Deterministic Policy Id"
+    },
+    "deterministic_policy_revision": {
+      "anyOf": [
+        {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Deterministic Policy Revision"
+    },
+    "deterministic_rule": {
+      "anyOf": [
+        {
+          "const": "first_allowed",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Deterministic Rule"
+    },
+    "inference_state": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/InferenceStateIdentity"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "mechanism": {
+      "$ref": "#/$defs/DecisionMechanism"
+    },
+    "readout_id": {
+      "anyOf": [
+        {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Readout Id"
+    },
+    "readout_revision": {
+      "anyOf": [
+        {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Readout Revision"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "mechanism"
+  ],
+  "title": "DecisionInferenceBinding",
+  "type": "object"
+}

@@ -1,0 +1,51 @@
+{
+  "$defs": {
+    "DecisionFailureClass": {
+      "enum": [
+        "engine_unavailable",
+        "engine_error",
+        "engine_timeout",
+        "missing_evidence",
+        "malformed_result",
+        "incompatible_result"
+      ],
+      "title": "DecisionFailureClass",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "classification": {
+      "$ref": "#/$defs/DecisionFailureClass"
+    },
+    "decision_id": {
+      "format": "uuid",
+      "title": "Decision Id",
+      "type": "string"
+    },
+    "detail": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Detail",
+      "type": "string"
+    },
+    "retryable": {
+      "default": false,
+      "title": "Retryable",
+      "type": "boolean"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "decision_id",
+    "classification",
+    "detail"
+  ],
+  "title": "DecisionEngineFailure",
+  "type": "object"
+}

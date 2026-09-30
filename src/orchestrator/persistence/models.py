@@ -10,6 +10,14 @@ from uuid import UUID
 from pydantic import Field, model_validator
 
 from orchestrator.domain.backend import ArtifactEntry, OutputStatus, WorkerResult
+from orchestrator.domain.decisions import (
+    DecisionDisposition,
+    DecisionEngineFailure,
+    DecisionRequest,
+    DecisionResult,
+    decision_request_hash,
+    decision_result_hash,
+)
 from orchestrator.domain.models import (
     AgentRunSpec,
     Artifact,
@@ -302,6 +310,59 @@ class StageRedirect(FrozenModel):
     updated_at: datetime
 
 
+class DecisionRecord(FrozenModel):
+    """Durable request and write-once normalized reply/disposition for a decision."""
+
+    schema_version: Literal[1] = 1
+    request: DecisionRequest
+    request_hash: str
+    request_persisted_revision: int = Field(ge=1)
+    result: DecisionResult | None = None
+    failure: DecisionEngineFailure | None = None
+    disposition: DecisionDisposition | None = None
+    created_at: datetime
+    completed_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_lifecycle_shape(self) -> DecisionRecord:
+        if self.request_hash != decision_request_hash(self.request):
+            raise ValueError("decision request hash does not match request")
+        if self.request_persisted_revision != self.request.current_run_revision + 1:
+            raise ValueError("decision request persistence revision must follow its run revision")
+        complete = self.completed_at is not None
+        if complete != (self.disposition is not None):
+            raise ValueError("completed decision requires a disposition")
+        if (self.result is not None) and (self.failure is not None):
+            raise ValueError("decision record cannot contain both result and failure")
+        if complete != (self.result is not None or self.failure is not None):
+            raise ValueError("completed decision requires exactly one result or failure")
+        if self.result is not None and self.result.decision_id != self.request.decision_id:
+            raise ValueError("decision result identity does not match request")
+        if self.failure is not None and self.failure.decision_id != self.request.decision_id:
+            raise ValueError("decision failure identity does not match request")
+        if self.disposition is not None:
+            if self.disposition.decision_id != self.request.decision_id:
+                raise ValueError("decision disposition identity does not match request")
+            if self.disposition.request_hash != self.request_hash:
+                raise ValueError("decision disposition references another request")
+            expected_result_hash = decision_result_hash(self.result) if self.result else None
+            if self.disposition.result_hash != expected_result_hash:
+                raise ValueError("decision disposition result hash does not match reply")
+        return self
+
+    @property
+    def decision_id(self) -> UUID:
+        return self.request.decision_id
+
+    @property
+    def run_id(self) -> str:
+        return self.request.run_id
+
+    @property
+    def question_id(self) -> str:
+        return self.request.question_id
+
+
 class CommandOutcome(StrEnum):
     ACCEPTED = "accepted"
     REJECTED = "rejected"
@@ -346,6 +407,7 @@ class LedgerMutation(FrozenModel):
     artifacts: tuple[ArtifactRegistration, ...] = ()
     intervention_records: tuple[InterventionRecord, ...] = ()
     stage_redirects: tuple[StageRedirect, ...] = ()
+    decision_records: tuple[DecisionRecord, ...] = ()
     receipt_outcome: CommandOutcome = CommandOutcome.ACCEPTED
     receipt_reason: str | None = None
 
@@ -376,6 +438,9 @@ class LedgerMutation(FrozenModel):
         redirect_stages = [item.stage_id for item in self.stage_redirects]
         if len(redirect_stages) != len(set(redirect_stages)):
             raise ValueError("a mutation can update each stage redirect only once")
+        decision_ids = [item.decision_id for item in self.decision_records]
+        if len(decision_ids) != len(set(decision_ids)):
+            raise ValueError("a mutation can update each decision record only once")
         return self
 
 

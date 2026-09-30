@@ -255,6 +255,73 @@ def _validate_workflow(
     for stage_id in sorted(stage_ids):
         visit(stage_id)
 
+    redirect_by_stage = {item.stage: item for item in workflow.allowed_redirects}
+    question_ids: set[str] = set()
+    for question in workflow.policy.decision_questions:
+        path = f"{base}.policy.decision_questions.{question.question_id}"
+        if question.question_id in question_ids:
+            issues.append(ValidationIssue(path, "duplicate decision question ID"))
+        question_ids.add(question.question_id)
+        decision_stage = stages.get(question.stage_id)
+        if (
+            decision_stage is None
+            or decision_stage.kind != StageKind.WORKER
+            or decision_stage.slot_kind != SlotKind.SELECT_ONE
+        ):
+            issues.append(
+                ValidationIssue(
+                    path + ".stage_id", "redirect decision requires a select_one worker stage"
+                )
+            )
+            continue
+        if not workflow.policy.allow_profile_selection:
+            issues.append(
+                ValidationIssue(path, "redirect decision requires allow_profile_selection")
+            )
+        redirect = redirect_by_stage.get(decision_stage.id)
+        if redirect is None:
+            issues.append(
+                ValidationIssue(
+                    path, "redirect decision requires a declared allowed_redirects entry"
+                )
+            )
+        else:
+            candidates = set(redirect.allowed_profiles)
+            if len(candidates) > 16:
+                issues.append(
+                    ValidationIssue(path, "decision outcome set cannot exceed 16 candidates")
+                )
+            acceptance = question.acceptance_policy
+            if acceptance.fallback_outcome_id is not None and (
+                acceptance.fallback_outcome_id not in candidates
+            ):
+                issues.append(
+                    ValidationIssue(
+                        path + ".acceptance_policy.fallback_outcome_id",
+                        "fallback outcome is outside the declared redirect candidates",
+                    )
+                )
+        for requirement in question.evidence_requirements:
+            if requirement.kind == "run_task":
+                continue
+            source_id = requirement.stage_id
+            output_name = requirement.output_name
+            evidence_source = stages.get(source_id or "")
+            if evidence_source is None or output_name not in evidence_source.required_outputs:
+                issues.append(
+                    ValidationIssue(
+                        path + ".evidence_requirements",
+                        f"unknown required stage output {requirement.source_ref!r}",
+                    )
+                )
+            elif source_id not in ancestry.get(stage.id, set()):
+                issues.append(
+                    ValidationIssue(
+                        path + ".evidence_requirements",
+                        f"evidence producer {source_id!r} is not an ancestor of the decision stage",
+                    )
+                )
+
     output_refs: set[str] = set()
     for stage in workflow.stages:
         output_refs.update(f"{stage.id}.{output}" for output in stage.required_outputs)

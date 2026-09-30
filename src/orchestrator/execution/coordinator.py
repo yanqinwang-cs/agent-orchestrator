@@ -32,11 +32,31 @@ from orchestrator.domain.backend import (
     WorkerStartedEvent,
     WorkerTerminalEvent,
 )
+from orchestrator.domain.decisions import (
+    DecisionDisposition,
+    DecisionDispositionReason,
+    DecisionDispositionStatus,
+    DecisionEngine,
+    DecisionEngineFailure,
+    DecisionEngineReply,
+    DecisionEvidence,
+    DecisionFailureClass,
+    DecisionMechanism,
+    DecisionOption,
+    DecisionPolicyAction,
+    DecisionRequest,
+    DecisionResult,
+    DecisionResultClass,
+    decision_request_hash,
+    decision_result_hash,
+    evaluate_decision,
+)
 from orchestrator.domain.models import (
     AgentRunSpec,
     AttemptState,
     AttemptStatus,
     Condition,
+    DecisionLifecycleEvent,
     Event,
     EventKind,
     FailureClass,
@@ -49,6 +69,7 @@ from orchestrator.domain.models import (
     OutboxStatus,
     PauseIntervention,
     RedirectIntervention,
+    ResolvedDecisionQuestion,
     ResolvedProfile,
     ResolvedStage,
     ResumeIntervention,
@@ -80,6 +101,7 @@ from orchestrator.persistence.models import (
     CommandReceipt,
     ControlDelivery,
     ControlDeliveryStatus,
+    DecisionRecord,
     InterventionRecord,
     LedgerMutation,
     OutboxAction,
@@ -110,6 +132,20 @@ _TERMINAL_RUN_STATES = {
     RunStatus.ATTENTION_REQUIRED,
 }
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+type DecisionEventKind = Literal[
+    EventKind.DECISION_REQUESTED,
+    EventKind.DECISION_INFERENCE_STARTED,
+    EventKind.DECISION_RESULT_RECORDED,
+    EventKind.DECISION_INFERENCE_FAILED,
+    EventKind.DECISION_RESULT_REJECTED,
+    EventKind.DECISION_RESULT_STALE,
+    EventKind.DECISION_RESULT_DISALLOWED,
+    EventKind.DECISION_ABSTAINED,
+    EventKind.DECISION_POLICY_EVALUATED,
+    EventKind.DECISION_ACCEPTED,
+    EventKind.DECISION_FALLBACK,
+    EventKind.DECISION_ATTENTION_REQUIRED,
+]
 
 
 class InputResolutionError(ValueError):
@@ -257,6 +293,8 @@ class ExecutionCoordinator:
         global_parallelism: int = 4,
         actor: str = "coordinator",
         control_timeout_seconds: float = 5.0,
+        decision_engine: DecisionEngine | None = None,
+        decision_timeout_seconds: float = 30.0,
     ) -> None:
         if global_parallelism < 1:
             raise ValueError("global_parallelism must be positive")
@@ -264,6 +302,8 @@ class ExecutionCoordinator:
             raise ValueError("coordinator ownership must be acquired before execution")
         if control_timeout_seconds <= 0:
             raise ValueError("control_timeout_seconds must be positive")
+        if decision_timeout_seconds <= 0:
+            raise ValueError("decision_timeout_seconds must be positive")
         self.ledger = ledger
         self.backend = backend
         self.ownership = ownership
@@ -271,6 +311,8 @@ class ExecutionCoordinator:
         self.global_parallelism = global_parallelism
         self.actor = actor
         self.control_timeout_seconds = control_timeout_seconds
+        self.decision_engine = decision_engine
+        self.decision_timeout_seconds = decision_timeout_seconds
         self._elapsed_origins: dict[str, tuple[float, float]] = {}
         self._workers: dict[str, asyncio.Task[None]] = {}
 
@@ -551,6 +593,7 @@ class ExecutionCoordinator:
         """Drive internal transitions and fake workers until completion or a genuine stall."""
         await self.recover(run_id)
         for _ in range(max_steps):
+            await self._process_ready_decisions(run_id)
             changed = self.advance(run_id)
             dispatched = await self.dispatch_pending(run_id)
             if self.ledger.get_run(run_id).state.status in _TERMINAL_RUN_STATES:
@@ -568,6 +611,498 @@ class ExecutionCoordinator:
                 continue
             return self.ledger.get_run(run_id).state.status
         raise RuntimeError("run exceeded its deterministic execution-step bound")
+
+    async def _process_ready_decisions(self, run_id: str) -> bool:
+        run = self.ledger.get_run(run_id)
+        questions = run.spec.workflow.policy.decision_questions
+        if not questions:
+            return False
+        records = self.ledger.list_decision_records(run_id)
+        for question in questions:
+            prior = next(
+                (item for item in reversed(records) if item.question_id == question.question_id),
+                None,
+            )
+            if prior is not None:
+                if prior.completed_at is None:
+                    failure = DecisionEngineFailure(
+                        decision_id=prior.decision_id,
+                        classification=DecisionFailureClass.ENGINE_UNAVAILABLE,
+                        detail="coordinator restarted before this decision reached a disposition",
+                    )
+                    await self._finalize_decision(run_id, prior, failure)
+                    return True
+                continue
+
+            # An explicit run-level profile selection is already coordinator input.
+            if any(
+                item.path == f"stage.{question.stage_id}.profile"
+                for item in run.spec.applied_overrides
+            ):
+                continue
+            # Preserve an explicit human redirect recorded through the control path.
+            if self.ledger.get_stage_redirect(run_id, question.stage_id) is not None:
+                continue
+            if run.state.status not in {RunStatus.READY, RunStatus.RUNNING}:
+                continue
+            stage = next(
+                (item for item in run.spec.workflow.stages if item.id == question.stage_id), None
+            )
+            projection = next(
+                (item for item in run.stages if item.stage_id == question.stage_id), None
+            )
+            if (
+                stage is None
+                or projection is None
+                or projection.status
+                not in {
+                    StageStatus.PENDING,
+                    StageStatus.READY,
+                }
+            ):
+                continue
+            stage_by_id = {item.stage_id: item for item in run.stages}
+            if any(
+                stage_by_id[dependency].status not in _SUCCESSFUL_STAGE_STATES
+                for dependency in stage.depends_on
+            ):
+                continue
+            await self._request_and_run_decision(run, question)
+            return True
+        return False
+
+    async def _request_and_run_decision(
+        self, run: PersistedRun, question: ResolvedDecisionQuestion
+    ) -> None:
+        options = tuple(
+            DecisionOption(
+                outcome_id=profile_id,
+                label=self._profile(run, profile_id).name,
+            )
+            for profile_id in self._decision_outcome_ids(run, question.stage_id)
+        )
+        evidence: list[DecisionEvidence] = []
+        missing: list[str] = []
+        requirements = question.evidence_requirements
+        for order, requirement in enumerate(requirements):
+            if requirement.kind == "run_task":
+                if len(run.spec.task.encode("utf-8")) > 16_384:
+                    missing.append(requirement.source_ref)
+                    continue
+                evidence.append(
+                    DecisionEvidence(
+                        source_ref="run.task",
+                        source_revision=run.spec.snapshot_hash,
+                        content_hash=content_hash(run.spec.task),
+                        inclusion_reason=requirement.inclusion_reason,
+                        order=order,
+                        current_run_revision=run.state.revision,
+                        value=run.spec.task,
+                    )
+                )
+                continue
+            projection = next(
+                (item for item in run.stages if item.stage_id == requirement.stage_id), None
+            )
+            artifact = (
+                next(
+                    (
+                        item
+                        for item in projection.result.outputs
+                        if item.name == requirement.output_name
+                    ),
+                    None,
+                )
+                if projection is not None and projection.result is not None
+                else None
+            )
+            if projection is None or projection.status != StageStatus.SUCCEEDED or artifact is None:
+                missing.append(requirement.source_ref)
+                continue
+            evidence.append(
+                DecisionEvidence(
+                    source_ref=requirement.source_ref,
+                    source_revision=artifact.content_hash,
+                    content_hash=artifact.content_hash,
+                    inclusion_reason=requirement.inclusion_reason,
+                    order=order,
+                    current_run_revision=run.state.revision,
+                )
+            )
+
+        now = self._now()
+        request = DecisionRequest(
+            decision_id=uuid4(),
+            run_id=run.run_id,
+            current_run_revision=run.state.revision,
+            question_id=question.question_id,
+            question_revision=question.revision,
+            question=question.question,
+            allowed_outcomes=options,
+            required_evidence_refs=tuple(item.source_ref for item in requirements),
+            missing_evidence_refs=tuple(missing),
+            evidence=tuple(evidence),
+            inference_binding=question.inference_binding,
+            acceptance_policy=question.acceptance_policy,
+            created_at=now,
+        )
+        request_hash = decision_request_hash(request)
+        record = DecisionRecord(
+            request=request,
+            request_hash=request_hash,
+            request_persisted_revision=run.state.revision + 1,
+            created_at=now,
+        )
+        engine = self.decision_engine
+        if (
+            engine is None
+            and request.inference_binding.mechanism == DecisionMechanism.DETERMINISTIC_POLICY
+        ):
+            from orchestrator.backends.decision import DeterministicDecisionEngine
+
+            engine = DeterministicDecisionEngine()
+        can_invoke = not missing and engine is not None
+        request_events: list[Event] = [
+            self._decision_event(
+                request,
+                EventKind.DECISION_REQUESTED,
+                request_hash=request_hash,
+            )
+        ]
+        if can_invoke:
+            request_events.append(
+                self._decision_event(
+                    request,
+                    EventKind.DECISION_INFERENCE_STARTED,
+                    request_hash=request_hash,
+                )
+            )
+        receipt = self.ledger.apply(
+            LedgerMutation(
+                command_id=uuid4(),
+                run_id=run.run_id,
+                expected_revision=run.state.revision,
+                actor=self.actor,
+                occurred_at=now,
+                run_update=RunProjectionUpdate(elapsed_seconds=self._elapsed(run)),
+                decision_records=(record,),
+                events=tuple(request_events),
+            )
+        )
+        if receipt.outcome != CommandOutcome.ACCEPTED:
+            return
+
+        if missing:
+            reply: DecisionEngineReply = DecisionEngineFailure(
+                decision_id=request.decision_id,
+                classification=DecisionFailureClass.MISSING_EVIDENCE,
+                detail="required decision evidence is missing: " + ", ".join(missing),
+            )
+        elif engine is None:
+            reply = DecisionEngineFailure(
+                decision_id=request.decision_id,
+                classification=DecisionFailureClass.ENGINE_UNAVAILABLE,
+                detail="no engine is configured for the resolved inference mechanism",
+            )
+        else:
+            try:
+                raw_reply = await asyncio.wait_for(
+                    engine.decide(request), timeout=self.decision_timeout_seconds
+                )
+                if isinstance(raw_reply, DecisionResult):
+                    reply = DecisionResult.model_validate(raw_reply.model_dump(mode="python"))
+                elif isinstance(raw_reply, DecisionEngineFailure):
+                    reply = DecisionEngineFailure.model_validate(
+                        raw_reply.model_dump(mode="python")
+                    )
+                else:
+                    reply = DecisionEngineFailure(
+                        decision_id=request.decision_id,
+                        classification=DecisionFailureClass.MALFORMED_RESULT,
+                        detail="decision engine returned a value outside the normalized contract",
+                    )
+            except TimeoutError:
+                reply = DecisionEngineFailure(
+                    decision_id=request.decision_id,
+                    classification=DecisionFailureClass.ENGINE_TIMEOUT,
+                    detail=f"decision inference exceeded {self.decision_timeout_seconds:g} seconds",
+                )
+            except ValidationError:
+                reply = DecisionEngineFailure(
+                    decision_id=request.decision_id,
+                    classification=DecisionFailureClass.MALFORMED_RESULT,
+                    detail="decision engine response failed normalized contract validation",
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                reply = DecisionEngineFailure(
+                    decision_id=request.decision_id,
+                    classification=DecisionFailureClass.ENGINE_ERROR,
+                    detail=f"decision engine raised {type(error).__name__}",
+                )
+        await self._finalize_decision(run.run_id, record, reply)
+
+    async def _finalize_decision(
+        self,
+        run_id: str,
+        record: DecisionRecord,
+        reply: DecisionEngineReply,
+    ) -> None:
+        request = record.request
+        for _ in range(5):
+            current = self.ledger.get_run(run_id)
+            current_allowed = self._decision_outcome_ids(current, request.question_id)
+            evaluation_revision = (
+                request.current_run_revision
+                if current.state.revision == record.request_persisted_revision
+                else current.state.revision
+            )
+            disposition = evaluate_decision(
+                request,
+                reply,
+                current_run_revision=evaluation_revision,
+                currently_allowed_outcomes=set(current_allowed),
+                evaluated_at=self._now(),
+            )
+            if disposition.policy_action in {
+                DecisionPolicyAction.CONTINUE,
+                DecisionPolicyAction.FALLBACK,
+            }:
+                if disposition.selected_outcome_id not in current_allowed:
+                    disposition = disposition.model_copy(
+                        update={
+                            "status": DecisionDispositionStatus.REJECTED,
+                            "policy_action": DecisionPolicyAction.ATTENTION_REQUIRED,
+                            "reason": DecisionDispositionReason.OUTCOME_NO_LONGER_ALLOWED,
+                            "selected_outcome_id": None,
+                        }
+                    )
+            resulting_revision = current.state.revision + 1
+            disposition = disposition.model_copy(
+                update={
+                    "resulting_run_revision": resulting_revision,
+                    "action_reference": str(request.decision_id),
+                }
+            )
+            completed = record.model_copy(
+                update={
+                    "result": reply if isinstance(reply, DecisionResult) else None,
+                    "failure": reply if isinstance(reply, DecisionEngineFailure) else None,
+                    "disposition": disposition,
+                    "completed_at": self._now(),
+                }
+            )
+            events = self._decision_completion_events(request, reply, disposition)
+            run_update = RunProjectionUpdate(elapsed_seconds=self._elapsed(current))
+            stage_redirects: tuple[StageRedirect, ...] = ()
+            if disposition.status in {
+                DecisionDispositionStatus.ACCEPTED,
+                DecisionDispositionStatus.FALLBACK,
+            }:
+                selected = disposition.selected_outcome_id
+                if selected is None:
+                    raise LedgerInvariantError("accepted decision omitted its selected outcome")
+                run_update = RunProjectionUpdate(
+                    elapsed_seconds=self._elapsed(current),
+                )
+                stage_redirects = (
+                    StageRedirect(
+                        run_id=run_id,
+                        stage_id=next(
+                            item.stage_id
+                            for item in current.spec.workflow.policy.decision_questions
+                            if item.question_id == request.question_id
+                        ),
+                        recipient_profile_id=selected,
+                        command_id=request.decision_id,
+                        updated_at=self._now(),
+                    ),
+                )
+            elif current.state.status not in {
+                RunStatus.PAUSE_REQUESTED,
+                RunStatus.PAUSED,
+                RunStatus.STOPPING,
+                RunStatus.STOPPED,
+                RunStatus.SUCCEEDED,
+                RunStatus.FAILED,
+                RunStatus.ATTENTION_REQUIRED,
+            }:
+                reason = (
+                    f"decision {request.question_id} requires attention: {disposition.reason.value}"
+                )
+                run_update = RunProjectionUpdate(
+                    status=RunStatus.ATTENTION_REQUIRED,
+                    elapsed_seconds=self._elapsed(current),
+                    attention_reason=reason,
+                    resume_status=current.state.resume_status or current.state.status,
+                )
+                events = (
+                    *events,
+                    RunStatusChangedEvent(
+                        event_id=uuid4(),
+                        run_id=run_id,
+                        occurred_at=self._now(),
+                        actor=self.actor,
+                        kind=EventKind.RUN_STATUS_CHANGED,
+                        previous=current.state.status,
+                        current=RunStatus.ATTENTION_REQUIRED,
+                        reason=reason,
+                        cause_event_id=events[-1].event_id if events else None,
+                    ),
+                )
+            receipt = self.ledger.apply(
+                LedgerMutation(
+                    command_id=uuid4(),
+                    run_id=run_id,
+                    expected_revision=current.state.revision,
+                    actor=self.actor,
+                    occurred_at=self._now(),
+                    run_update=run_update,
+                    decision_records=(completed,),
+                    stage_redirects=stage_redirects,
+                    events=events,
+                )
+            )
+            if receipt.outcome == CommandOutcome.ACCEPTED:
+                return
+            if not receipt.reason or not receipt.reason.startswith("stale_revision"):
+                raise LedgerInvariantError(receipt.reason or "decision disposition was rejected")
+        raise LedgerInvariantError("run kept changing while persisting a decision disposition")
+
+    def _decision_outcome_ids(
+        self, run: PersistedRun, stage_id_or_question_id: str
+    ) -> tuple[str, ...]:
+        question = next(
+            (
+                item
+                for item in run.spec.workflow.policy.decision_questions
+                if item.stage_id == stage_id_or_question_id
+                or item.question_id == stage_id_or_question_id
+            ),
+            None,
+        )
+        stage_id = question.stage_id if question is not None else stage_id_or_question_id
+        redirect = next(
+            (item for item in run.spec.workflow.allowed_redirects if item.stage == stage_id), None
+        )
+        if redirect is None:
+            raise LedgerInvariantError(
+                f"decision stage {stage_id} has no frozen redirect allowlist"
+            )
+        allowed_profiles = set(run.spec.workflow.allowed_profiles)
+        stage = next((item for item in run.spec.workflow.stages if item.id == stage_id), None)
+        if stage is None:
+            raise LedgerInvariantError(
+                f"decision stage {stage_id} is absent from the frozen workflow"
+            )
+        profile_ids = {item.id for item in run.spec.profiles}
+        return tuple(
+            profile_id
+            for profile_id in redirect.allowed_profiles
+            if profile_id in stage.allowed_profiles
+            and profile_id in allowed_profiles
+            and profile_id in profile_ids
+        )
+
+    def _decision_event(
+        self,
+        request: DecisionRequest,
+        kind: DecisionEventKind,
+        *,
+        request_hash: str,
+        result_hash: str | None = None,
+        disposition: DecisionDisposition | None = None,
+        detail: str | None = None,
+    ) -> DecisionLifecycleEvent:
+        return DecisionLifecycleEvent(
+            event_id=uuid4(),
+            run_id=request.run_id,
+            occurred_at=self._now(),
+            actor=self.actor,
+            kind=kind,
+            decision_id=request.decision_id,
+            question_id=request.question_id,
+            request_hash=request_hash,
+            result_hash=result_hash,
+            disposition_status=(disposition.status.value if disposition else None),
+            disposition_reason=(disposition.reason.value if disposition else None),
+            outcome_id=(disposition.selected_outcome_id if disposition else None),
+            detail=detail,
+        )
+
+    def _decision_completion_events(
+        self,
+        request: DecisionRequest,
+        reply: DecisionEngineReply,
+        disposition: DecisionDisposition,
+    ) -> tuple[Event, ...]:
+        request_hash = decision_request_hash(request)
+        result_hash = decision_result_hash(reply) if isinstance(reply, DecisionResult) else None
+        events: list[Event] = []
+        if isinstance(reply, DecisionEngineFailure):
+            events.append(
+                self._decision_event(
+                    request,
+                    EventKind.DECISION_INFERENCE_FAILED,
+                    request_hash=request_hash,
+                    detail=f"{reply.classification.value}: {reply.detail}",
+                )
+            )
+        else:
+            events.append(
+                self._decision_event(
+                    request,
+                    EventKind.DECISION_RESULT_RECORDED,
+                    request_hash=request_hash,
+                    result_hash=result_hash,
+                )
+            )
+        events.append(
+            self._decision_event(
+                request,
+                EventKind.DECISION_POLICY_EVALUATED,
+                request_hash=request_hash,
+                result_hash=result_hash,
+                disposition=disposition,
+            )
+        )
+        reason = disposition.reason
+        kind: DecisionEventKind
+        if disposition.status == DecisionDispositionStatus.ABSTAINED:
+            kind = EventKind.DECISION_ABSTAINED
+        elif reason in {
+            DecisionDispositionReason.STALE_RUN_REVISION,
+            DecisionDispositionReason.STALE_EVIDENCE,
+        }:
+            kind = EventKind.DECISION_RESULT_STALE
+        elif reason in {
+            DecisionDispositionReason.DISALLOWED_OUTCOME,
+            DecisionDispositionReason.OUTCOME_NO_LONGER_ALLOWED,
+        }:
+            kind = EventKind.DECISION_RESULT_DISALLOWED
+        elif disposition.status == DecisionDispositionStatus.REJECTED or (
+            isinstance(reply, DecisionResult)
+            and reply.result_class
+            in {DecisionResultClass.MALFORMED, DecisionResultClass.INCOMPATIBLE}
+        ):
+            kind = EventKind.DECISION_RESULT_REJECTED
+        elif disposition.status == DecisionDispositionStatus.ACCEPTED:
+            kind = EventKind.DECISION_ACCEPTED
+        elif disposition.status == DecisionDispositionStatus.FALLBACK:
+            kind = EventKind.DECISION_FALLBACK
+        else:
+            kind = EventKind.DECISION_ATTENTION_REQUIRED
+        events.append(
+            self._decision_event(
+                request,
+                kind,
+                request_hash=request_hash,
+                result_hash=result_hash,
+                disposition=disposition,
+            )
+        )
+        return tuple(events)
 
     async def wait_for_workers(self) -> None:
         """Wait for every worker event stream currently owned by this coordinator."""
@@ -2430,6 +2965,53 @@ class ExecutionCoordinator:
         *,
         repair_decision: str | None,
     ) -> bool:
+        decision_question = next(
+            (
+                question
+                for question in run.spec.workflow.policy.decision_questions
+                if question.stage_id == stage.id
+            ),
+            None,
+        )
+        explicit_profile_override = any(
+            item.path == f"stage.{stage.id}.profile" for item in run.spec.applied_overrides
+        )
+        if decision_question is not None and not explicit_profile_override:
+            redirect_profile = self.ledger.get_stage_redirect(run.run_id, stage.id)
+            redirect_record = self.ledger.get_stage_redirect_record(run.run_id, stage.id)
+            records = self.ledger.list_decision_records(run.run_id)
+            decision_record = next(
+                (
+                    item
+                    for item in reversed(records)
+                    if item.question_id == decision_question.question_id
+                ),
+                None,
+            )
+            if redirect_profile is None:
+                return False
+            allowed = self._decision_outcome_ids(run, stage.id)
+            if redirect_profile not in allowed:
+                raise LedgerInvariantError(
+                    f"decision redirect {redirect_profile!r} is outside the frozen allowlist"
+                )
+            if decision_record is not None:
+                disposition = decision_record.disposition
+                if (
+                    redirect_record is not None
+                    and redirect_record.command_id == decision_record.decision_id
+                    and (
+                        decision_record.completed_at is None
+                        or disposition is None
+                        or disposition.status
+                        not in {
+                            DecisionDispositionStatus.ACCEPTED,
+                            DecisionDispositionStatus.FALLBACK,
+                        }
+                        or disposition.selected_outcome_id != redirect_profile
+                    )
+                ):
+                    return False
         slots = resolve_stage_slots(
             run,
             stage,

@@ -1,12 +1,5 @@
 {
   "$defs": {
-    "ApprovalMode": {
-      "enum": [
-        "deny_all"
-      ],
-      "title": "ApprovalMode",
-      "type": "string"
-    },
     "CalibrationIdentity": {
       "additionalProperties": false,
       "properties": {
@@ -168,43 +161,46 @@
       "title": "DecisionAcceptancePolicy",
       "type": "object"
     },
-    "DecisionEvidenceRequirement": {
+    "DecisionEvidence": {
       "additionalProperties": false,
-      "description": "A narrow, authored source reference for evidence required by a question.",
       "properties": {
+        "content_hash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "current_run_revision": {
+          "minimum": 0,
+          "title": "Current Run Revision",
+          "type": "integer"
+        },
         "inclusion_reason": {
           "maxLength": 160,
           "minLength": 1,
           "title": "Inclusion Reason",
           "type": "string"
         },
-        "kind": {
-          "enum": [
-            "run_task",
-            "stage_output"
-          ],
-          "title": "Kind",
+        "order": {
+          "minimum": 0,
+          "title": "Order",
+          "type": "integer"
+        },
+        "source_ref": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Source Ref",
           "type": "string"
         },
-        "output_name": {
-          "anyOf": [
-            {
-              "minLength": 1,
-              "pattern": "^[a-z][a-z0-9_-]*$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Output Name"
+        "source_revision": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Source Revision",
+          "type": "string"
         },
-        "stage_id": {
+        "value": {
           "anyOf": [
             {
-              "minLength": 1,
-              "pattern": "^[a-z][a-z0-9_-]*$",
+              "maxLength": 16384,
               "type": "string"
             },
             {
@@ -212,14 +208,18 @@
             }
           ],
           "default": null,
-          "title": "Stage Id"
+          "title": "Value"
         }
       },
       "required": [
-        "kind",
-        "inclusion_reason"
+        "source_ref",
+        "source_revision",
+        "content_hash",
+        "inclusion_reason",
+        "order",
+        "current_run_revision"
       ],
-      "title": "DecisionEvidenceRequirement",
+      "title": "DecisionEvidence",
       "type": "object"
     },
     "DecisionInferenceBinding": {
@@ -427,71 +427,27 @@
       "title": "DecisionMechanism",
       "type": "string"
     },
-    "DecisionQuestionConfig": {
+    "DecisionOption": {
       "additionalProperties": false,
-      "description": "Authored bounded decision configuration stored in a workflow policy.",
       "properties": {
-        "acceptance_policy": {
-          "$ref": "#/$defs/DecisionAcceptancePolicy"
-        },
-        "action": {
-          "const": "redirect_select_one",
-          "default": "redirect_select_one",
-          "title": "Action",
-          "type": "string"
-        },
-        "evidence_requirements": {
-          "default": [],
-          "items": {
-            "$ref": "#/$defs/DecisionEvidenceRequirement"
-          },
-          "maxItems": 16,
-          "title": "Evidence Requirements",
-          "type": "array"
-        },
-        "inference_binding": {
-          "$ref": "#/$defs/DecisionInferenceBinding"
-        },
-        "question": {
-          "maxLength": 2000,
-          "minLength": 1,
-          "title": "Question",
-          "type": "string"
-        },
-        "question_id": {
-          "minLength": 1,
-          "pattern": "^[a-z][a-z0-9_-]*$",
-          "title": "Question Id",
-          "type": "string"
-        },
-        "revision": {
+        "label": {
           "maxLength": 160,
           "minLength": 1,
-          "title": "Revision",
+          "title": "Label",
           "type": "string"
         },
-        "schema_version": {
-          "const": 1,
-          "default": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "stage_id": {
+        "outcome_id": {
           "minLength": 1,
           "pattern": "^[a-z][a-z0-9_-]*$",
-          "title": "Stage Id",
+          "title": "Outcome Id",
           "type": "string"
         }
       },
       "required": [
-        "question_id",
-        "revision",
-        "stage_id",
-        "question",
-        "inference_binding",
-        "acceptance_policy"
+        "outcome_id",
+        "label"
       ],
-      "title": "DecisionQuestionConfig",
+      "title": "DecisionOption",
       "type": "object"
     },
     "InferenceStateIdentity": {
@@ -522,126 +478,108 @@
       ],
       "title": "InferenceStateIdentity",
       "type": "object"
-    },
-    "PermissionSet": {
-      "additionalProperties": false,
-      "description": "Requested worker permissions; tool lists remain intentions, not enforcement.",
-      "properties": {
-        "approval_mode": {
-          "$ref": "#/$defs/ApprovalMode",
-          "default": "deny_all"
-        },
-        "external_integrations": {
-          "default": false,
-          "title": "External Integrations",
-          "type": "boolean"
-        },
-        "nested_agents": {
-          "default": false,
-          "title": "Nested Agents",
-          "type": "boolean"
-        },
-        "sandbox": {
-          "$ref": "#/$defs/SandboxMode"
-        },
-        "shell_network": {
-          "default": false,
-          "title": "Shell Network",
-          "type": "boolean"
-        },
-        "web_search": {
-          "default": false,
-          "title": "Web Search",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "sandbox"
-      ],
-      "title": "PermissionSet",
-      "type": "object"
-    },
-    "SandboxMode": {
-      "enum": [
-        "read-only",
-        "workspace-write"
-      ],
-      "title": "SandboxMode",
-      "type": "string"
     }
   },
   "additionalProperties": false,
+  "description": "One immutable question, evidence selection, outcome set, and effective policy.",
   "properties": {
-    "allow_count_selection": {
-      "default": false,
-      "title": "Allow Count Selection",
-      "type": "boolean"
+    "acceptance_policy": {
+      "$ref": "#/$defs/DecisionAcceptancePolicy"
     },
-    "allow_new_profiles": {
-      "default": false,
-      "title": "Allow New Profiles",
-      "type": "boolean"
-    },
-    "allow_optional_skip": {
-      "default": false,
-      "title": "Allow Optional Skip",
-      "type": "boolean"
-    },
-    "allow_permission_expansion": {
-      "default": false,
-      "title": "Allow Permission Expansion",
-      "type": "boolean"
-    },
-    "allow_profile_selection": {
-      "default": false,
-      "title": "Allow Profile Selection",
-      "type": "boolean"
-    },
-    "allow_required_stage_removal": {
-      "default": false,
-      "title": "Allow Required Stage Removal",
-      "type": "boolean"
-    },
-    "allow_retry": {
-      "default": true,
-      "title": "Allow Retry",
-      "type": "boolean"
-    },
-    "allowed_backends": {
+    "allowed_outcomes": {
       "items": {
+        "$ref": "#/$defs/DecisionOption"
+      },
+      "maxItems": 16,
+      "minItems": 1,
+      "title": "Allowed Outcomes",
+      "type": "array"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "current_run_revision": {
+      "minimum": 0,
+      "title": "Current Run Revision",
+      "type": "integer"
+    },
+    "decision_id": {
+      "format": "uuid",
+      "title": "Decision Id",
+      "type": "string"
+    },
+    "evidence": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/DecisionEvidence"
+      },
+      "maxItems": 16,
+      "title": "Evidence",
+      "type": "array"
+    },
+    "inference_binding": {
+      "$ref": "#/$defs/DecisionInferenceBinding"
+    },
+    "missing_evidence_refs": {
+      "default": [],
+      "items": {
+        "maxLength": 160,
         "minLength": 1,
-        "pattern": "^[a-z][a-z0-9_-]*$",
         "type": "string"
       },
-      "title": "Allowed Backends",
+      "maxItems": 16,
+      "title": "Missing Evidence Refs",
       "type": "array"
     },
-    "allowed_model_bindings": {
-      "items": {
-        "minLength": 1,
-        "pattern": "^[a-z][a-z0-9_-]*$",
-        "type": "string"
-      },
-      "title": "Allowed Model Bindings",
-      "type": "array"
-    },
-    "decision_questions": {
-      "items": {
-        "$ref": "#/$defs/DecisionQuestionConfig"
-      },
-      "title": "Decision Questions",
-      "type": "array"
-    },
-    "permission_ceiling": {
+    "parent_decision_id": {
       "anyOf": [
         {
-          "$ref": "#/$defs/PermissionSet"
+          "format": "uuid",
+          "type": "string"
         },
         {
           "type": "null"
         }
       ],
-      "default": null
+      "default": null,
+      "title": "Parent Decision Id"
+    },
+    "question": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Question",
+      "type": "string"
+    },
+    "question_id": {
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "title": "Question Id",
+      "type": "string"
+    },
+    "question_revision": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Question Revision",
+      "type": "string"
+    },
+    "required_evidence_refs": {
+      "default": [],
+      "items": {
+        "maxLength": 160,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 16,
+      "title": "Required Evidence Refs",
+      "type": "array"
+    },
+    "run_id": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
     },
     "schema_version": {
       "const": 1,
@@ -651,9 +589,17 @@
     }
   },
   "required": [
-    "allowed_backends",
-    "allowed_model_bindings"
+    "decision_id",
+    "run_id",
+    "current_run_revision",
+    "question_id",
+    "question_revision",
+    "question",
+    "allowed_outcomes",
+    "inference_binding",
+    "acceptance_policy",
+    "created_at"
   ],
-  "title": "OrchestratorPolicy",
+  "title": "DecisionRequest",
   "type": "object"
 }

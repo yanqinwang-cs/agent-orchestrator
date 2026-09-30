@@ -8,6 +8,7 @@ from collections.abc import Collection, Mapping, Sequence
 
 from pydantic import BaseModel
 
+from orchestrator.domain.decisions import ResolvedDecisionQuestion
 from orchestrator.domain.models import (
     AgentProfile,
     ContextPolicy,
@@ -169,7 +170,7 @@ def resolve_run(
         )
         if count != stage.min_workers:
             applied.append(OverrideEntry(path=f"stage.{stage.id}.worker_count", value=str(count)))
-        if selected_profile != stage.default_profile:
+        if stage.id in run_overrides.profile_selections:
             applied.append(OverrideEntry(path=f"stage.{stage.id}.profile", value=selected_profile))
 
     for key in (
@@ -442,6 +443,10 @@ def _freeze_workflow(workflow: WorkflowPreset, project_parallelism: int) -> Reso
             allow_new_profiles=workflow.policy.allow_new_profiles,
             allow_required_stage_removal=workflow.policy.allow_required_stage_removal,
             permission_ceiling=workflow.policy.permission_ceiling,
+            decision_questions=tuple(
+                ResolvedDecisionQuestion.model_validate(question.model_dump())
+                for question in workflow.policy.decision_questions
+            ),
         ),
         allowed_redirects=tuple(
             ResolvedRedirectRule(stage=rule.stage, allowed_profiles=tuple(rule.allowed_profiles))

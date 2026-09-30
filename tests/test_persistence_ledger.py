@@ -8,6 +8,20 @@ import pytest
 
 from orchestrator.artifacts import ArtifactPathError, ArtifactStore
 from orchestrator.domain.backend import ArtifactEntry, OutputStatus, WorkerResult
+from orchestrator.domain.decisions import (
+    DecisionAcceptancePolicy,
+    DecisionDisposition,
+    DecisionDispositionReason,
+    DecisionDispositionStatus,
+    DecisionInferenceBinding,
+    DecisionMechanism,
+    DecisionOption,
+    DecisionPolicyAction,
+    DecisionRequest,
+    DecisionResult,
+    decision_request_hash,
+    decision_result_hash,
+)
 from orchestrator.domain.models import (
     AgentRunSpec,
     AttemptState,
@@ -33,6 +47,7 @@ from orchestrator.persistence.models import (
     ArtifactPublication,
     AttemptRegistration,
     AttemptResultRegistration,
+    DecisionRecord,
     LedgerMutation,
     OutboxIntent,
     OutboxStatus,
@@ -97,10 +112,10 @@ def test_database_is_versioned_and_survives_reopen(tmp_path) -> None:
     path = tmp_path / "orchestrator.sqlite3"
 
     with SQLiteLedger(path) as ledger:
-        assert ledger.schema_version == 3
+        assert ledger.schema_version == 4
 
     with SQLiteLedger(path) as reopened:
-        assert reopened.schema_version == 3
+        assert reopened.schema_version == 4
 
 
 def test_database_rejects_a_schema_newer_than_this_application(tmp_path) -> None:
@@ -125,7 +140,7 @@ def test_v1_database_receives_additive_result_and_control_migrations(tmp_path) -
         connection.execute("PRAGMA user_version = 1")
 
     with SQLiteLedger(path) as ledger:
-        assert ledger.schema_version == 3
+        assert ledger.schema_version == 4
     with sqlite3.connect(path) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(stages)").fetchall()}
         assert "result_payload" in columns
@@ -142,12 +157,113 @@ def test_v1_database_receives_additive_result_and_control_migrations(tmp_path) -
         assert {
             "intervention_records",
             "stage_redirects",
+            "decision_records",
         } <= {
             row[0]
             for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
         }
+
+
+def test_decision_request_and_disposition_survive_reopen_write_once(tmp_path, app_config) -> None:
+    path = tmp_path / "decisions.sqlite3"
+    with SQLiteLedger(path) as ledger:
+        _create_run(ledger, app_config)
+        request = DecisionRequest(
+            decision_id=uuid4(),
+            run_id="run-1",
+            current_run_revision=0,
+            question_id="implementer_choice",
+            question_revision="1",
+            question="Choose an approved specialist.",
+            allowed_outcomes=(
+                DecisionOption(outcome_id="reviewer", label="Reviewer"),
+                DecisionOption(outcome_id="planner", label="Planner"),
+            ),
+            inference_binding=DecisionInferenceBinding(
+                mechanism=DecisionMechanism.DETERMINISTIC_POLICY,
+                deterministic_policy_id="first_allowed_outcome",
+                deterministic_policy_revision="1",
+                deterministic_rule="first_allowed",
+            ),
+            acceptance_policy=DecisionAcceptancePolicy(
+                policy_id="typed_outcome", revision="1", mode="typed_outcome"
+            ),
+            created_at=STAMP,
+        )
+        pending = DecisionRecord(
+            request=request,
+            request_hash=decision_request_hash(request),
+            request_persisted_revision=1,
+            created_at=STAMP,
+        )
+        ledger.apply(
+            LedgerMutation(
+                command_id=uuid4(),
+                run_id="run-1",
+                expected_revision=0,
+                actor="coordinator",
+                occurred_at=STAMP,
+                run_update=RunProjectionUpdate(),
+                decision_records=(pending,),
+            )
+        )
+        result = DecisionResult(
+            decision_id=request.decision_id,
+            effective_inference=request.inference_binding,
+            consumed_run_revision=0,
+            consumed_evidence_digest=request.evidence_digest,
+            outcome_id="reviewer",
+        )
+        disposition = DecisionDisposition(
+            decision_id=request.decision_id,
+            request_hash=pending.request_hash,
+            result_hash=decision_result_hash(result),
+            status=DecisionDispositionStatus.ACCEPTED,
+            policy_action=DecisionPolicyAction.CONTINUE,
+            reason=DecisionDispositionReason.ACCEPTED_TYPED_OUTCOME,
+            policy_id="typed_outcome",
+            policy_revision="1",
+            selected_outcome_id="reviewer",
+            resulting_run_revision=2,
+            evaluated_at=STAMP,
+        )
+        completed = pending.model_copy(
+            update={"result": result, "disposition": disposition, "completed_at": STAMP}
+        )
+        ledger.apply(
+            LedgerMutation(
+                command_id=uuid4(),
+                run_id="run-1",
+                expected_revision=1,
+                actor="coordinator",
+                occurred_at=STAMP,
+                run_update=RunProjectionUpdate(),
+                decision_records=(completed,),
+            )
+        )
+
+    with SQLiteLedger(path) as reopened:
+        record = reopened.get_decision_record(request.decision_id)
+        assert record.result == result
+        assert record.disposition == disposition
+        assert reopened.list_decision_records("run-1") == (record,)
+        changed = record.model_copy(
+            update={"disposition": disposition.model_copy(update={"policy_revision": "2"})}
+        )
+        with pytest.raises(LedgerInvariantError, match="write-once"):
+            reopened.apply(
+                LedgerMutation(
+                    command_id=uuid4(),
+                    run_id="run-1",
+                    expected_revision=2,
+                    actor="coordinator",
+                    occurred_at=STAMP,
+                    run_update=RunProjectionUpdate(),
+                    decision_records=(changed,),
+                )
+            )
 
 
 def test_normalized_attempt_results_and_stage_outputs_survive_reopen_immutably(

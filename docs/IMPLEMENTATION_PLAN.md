@@ -1,6 +1,6 @@
 # Implementation plan
 
-Status: architecture and acceptance criteria, updated 29 September 2026. Milestones 1–3 are implemented and validated. Milestones 4–10 are planned.
+Status: architecture and acceptance criteria, updated 30 September 2026. Milestones 1–5 are implemented; milestones 6–10 remain planned. M5 implements the provider-neutral decision contract and local coordinator path below; live inference and capability-ownership integration remain future work.
 
 ## 1. Runtime decision
 
@@ -140,11 +140,13 @@ Codex mapping for the planned adapter: official `AsyncCodex` → `thread_start` 
 
 The Codex adapter must verify effective filesystem/network settings and ambient integrations. A prompt saying “only run tests” is not a shell-command whitelist. Mark tool intentions separately from enforced capabilities; unsupported mandatory restrictions fail preflight. Use a dedicated Codex home for app-managed harness settings, let Codex own its sign-in flow, and inspect trusted project configuration before execution. Do not implement custom OAuth or a credential database.
 
-### DecisionEngine (planned milestone 5)
+### DecisionEngine (implemented milestone 5)
 
 Use an optional semantic decision layer only when the choice cannot be expressed reliably with the declared deterministic rules. A `DecisionRequest` names one bounded question and contains only the selected evidence values with their persisted references/provenance, the allowed result shape and the current run revision. The engine sees no whole transcript and returns one narrow, versioned typed result. Examples include selecting an approved specialist, routing reviewer-versus-debugger, judging whether proposed tasks are independent enough for a declared parallel count, interpreting monitoring intent, or selecting an approved model tier.
 
 The engine has no action or tool authority. The coordinator checks that the run revision is still current and that every returned profile, route, count or binding is already permitted by the resolved topology, policy and budget. It then persists the result and provenance before dispatching any action. An invalid or stale result follows an explicit deterministic failure/attention path. A configured deterministic policy remains usable when no engine is selected. The engine never rewrites handoffs or supplies arbitrary workflow JSON.
+
+M5 adds the versioned bounded-decision contract, deterministic and fake inference paths, additive SQLite persistence, and coordinator validation before dispatch. Its offline fixtures cover four inference shapes. The Prototype workflow applies a specialist choice within its declared redirect allowlist. Plan evidence is persisted by identity and hash, but its content is not assembled into inference requests. No live model routing or provider is integrated.
 
 ### Handoffs
 

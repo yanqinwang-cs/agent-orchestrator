@@ -1,0 +1,56 @@
+{
+  "$defs": {
+    "DecisionScoreEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "outcome_id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Outcome Id",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        }
+      },
+      "required": [
+        "outcome_id",
+        "value"
+      ],
+      "title": "DecisionScoreEntry",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "scale_id": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Scale Id",
+      "type": "string"
+    },
+    "semantics_id": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Semantics Id",
+      "type": "string"
+    },
+    "values": {
+      "items": {
+        "$ref": "#/$defs/DecisionScoreEntry"
+      },
+      "maxItems": 16,
+      "minItems": 1,
+      "title": "Values",
+      "type": "array"
+    }
+  },
+  "required": [
+    "semantics_id",
+    "scale_id",
+    "values"
+  ],
+  "title": "DecisionScoreVector",
+  "type": "object"
+}

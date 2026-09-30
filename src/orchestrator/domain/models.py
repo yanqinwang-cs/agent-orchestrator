@@ -9,6 +9,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from orchestrator.domain.decisions import DecisionQuestionConfig, ResolvedDecisionQuestion
+
 Identifier = Annotated[str, StringConstraints(min_length=1, pattern=r"^[a-z][a-z0-9_-]*$")]
 NonEmpty = Annotated[str, StringConstraints(min_length=1)]
 
@@ -247,6 +249,14 @@ class OrchestratorPolicy(StrictModel):
     allow_new_profiles: bool = False
     allow_required_stage_removal: bool = False
     permission_ceiling: PermissionSet | None = None
+    decision_questions: list[DecisionQuestionConfig] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def unique_decision_questions(self) -> OrchestratorPolicy:
+        ids = [question.question_id for question in self.decision_questions]
+        if len(ids) != len(set(ids)):
+            raise ValueError("decision question IDs must be unique within a workflow")
+        return self
 
 
 class WorkflowPreset(StrictModel):
@@ -466,6 +476,7 @@ class ResolvedOrchestratorPolicy(FrozenModel):
     allow_new_profiles: bool = False
     allow_required_stage_removal: bool = False
     permission_ceiling: PermissionSet | None = None
+    decision_questions: tuple[ResolvedDecisionQuestion, ...] = ()
 
 
 class ResolvedWorkflow(FrozenModel):
@@ -753,6 +764,18 @@ class EventKind(StrEnum):
     RESERVATION_STATUS_CHANGED = "reservation_status_changed"
     ARTIFACT_RECORDED = "artifact_recorded"
     HANDOFF_RECORDED = "handoff_recorded"
+    DECISION_REQUESTED = "decision_requested"
+    DECISION_INFERENCE_STARTED = "decision_inference_started"
+    DECISION_RESULT_RECORDED = "decision_result_recorded"
+    DECISION_INFERENCE_FAILED = "decision_inference_failed"
+    DECISION_RESULT_REJECTED = "decision_result_rejected"
+    DECISION_RESULT_STALE = "decision_result_stale"
+    DECISION_RESULT_DISALLOWED = "decision_result_disallowed"
+    DECISION_ABSTAINED = "decision_abstained"
+    DECISION_POLICY_EVALUATED = "decision_policy_evaluated"
+    DECISION_ACCEPTED = "decision_accepted"
+    DECISION_FALLBACK = "decision_fallback"
+    DECISION_ATTENTION_REQUIRED = "decision_attention_required"
 
 
 class EventBase(FrozenModel):
@@ -868,6 +891,31 @@ class HandoffRecordedEvent(EventBase):
     handoff: Handoff
 
 
+class DecisionLifecycleEvent(EventBase):
+    kind: Literal[
+        EventKind.DECISION_REQUESTED,
+        EventKind.DECISION_INFERENCE_STARTED,
+        EventKind.DECISION_RESULT_RECORDED,
+        EventKind.DECISION_INFERENCE_FAILED,
+        EventKind.DECISION_RESULT_REJECTED,
+        EventKind.DECISION_RESULT_STALE,
+        EventKind.DECISION_RESULT_DISALLOWED,
+        EventKind.DECISION_ABSTAINED,
+        EventKind.DECISION_POLICY_EVALUATED,
+        EventKind.DECISION_ACCEPTED,
+        EventKind.DECISION_FALLBACK,
+        EventKind.DECISION_ATTENTION_REQUIRED,
+    ]
+    decision_id: UUID
+    question_id: Identifier
+    request_hash: str
+    result_hash: str | None = None
+    disposition_status: str | None = None
+    disposition_reason: str | None = None
+    outcome_id: Identifier | None = None
+    detail: str | None = None
+
+
 type Event = Annotated[
     RunStatusChangedEvent
     | StageStatusChangedEvent
@@ -880,6 +928,7 @@ type Event = Annotated[
     | OutboxStatusChangedEvent
     | ReservationStatusChangedEvent
     | ArtifactRecordedEvent
-    | HandoffRecordedEvent,
+    | HandoffRecordedEvent
+    | DecisionLifecycleEvent,
     Field(discriminator="kind"),
 ]

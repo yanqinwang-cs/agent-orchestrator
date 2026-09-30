@@ -1,0 +1,163 @@
+{
+  "$defs": {
+    "CalibrationIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "content_hash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "revision": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Revision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "revision",
+        "content_hash"
+      ],
+      "title": "CalibrationIdentity",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Deterministic rules for consuming a normalized decision result.",
+  "properties": {
+    "fallback_outcome_id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Fallback Outcome Id"
+    },
+    "minimum_score": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Minimum Score"
+    },
+    "mode": {
+      "enum": [
+        "typed_outcome",
+        "score_threshold"
+      ],
+      "title": "Mode",
+      "type": "string"
+    },
+    "on_abstention": {
+      "default": "attention_required",
+      "enum": [
+        "fallback",
+        "attention_required"
+      ],
+      "title": "On Abstention",
+      "type": "string"
+    },
+    "on_engine_failure": {
+      "default": "attention_required",
+      "enum": [
+        "fallback",
+        "attention_required"
+      ],
+      "title": "On Engine Failure",
+      "type": "string"
+    },
+    "policy_id": {
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "title": "Policy Id",
+      "type": "string"
+    },
+    "required_calibration": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CalibrationIdentity"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "required_score_scale": {
+      "anyOf": [
+        {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Required Score Scale"
+    },
+    "required_score_semantics": {
+      "anyOf": [
+        {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Required Score Semantics"
+    },
+    "revision": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Revision",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "understood_score_semantics": {
+      "default": [],
+      "items": {
+        "maxLength": 160,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Understood Score Semantics",
+      "type": "array"
+    }
+  },
+  "required": [
+    "policy_id",
+    "revision",
+    "mode"
+  ],
+  "title": "DecisionAcceptancePolicy",
+  "type": "object"
+}
