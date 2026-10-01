@@ -69,51 +69,123 @@ AUDITED_SOURCE_REVISION = "ff6aec96948b70d94983af2641a6b67c94faeff5"
 _FACT_ENVIRONMENT_POLICY = "codex-app-server-allowlist-v1"
 _MAX_DELTA_BYTES = MAX_CODEX_REPORT_BYTES + 1
 _MAX_DIAGNOSTIC_CHARS = 160
-_SAFE_CONFIG_KEYS = {
-    "analytics",
-    "approvalPolicy",
-    "approval_policy",
-    "compactPrompt",
-    "compact_prompt",
-    "developerInstructions",
-    "developer_instructions",
-    "instructions",
-    "model",
-    "modelAutoCompactTokenLimit",
-    "model_auto_compact_token_limit",
-    "modelAutoCompactTokenLimitScope",
-    "model_auto_compact_token_limit_scope",
-    "modelContextWindow",
-    "model_context_window",
-    "modelProvider",
-    "model_provider",
-    "modelReasoningEffort",
-    "model_reasoning_effort",
-    "modelReasoningSummary",
-    "model_reasoning_summary",
-    "modelVerbosity",
-    "model_verbosity",
-    "sandboxMode",
-    "sandbox_mode",
-    "sandboxWorkspaceWrite",
-    "sandbox_workspace_write",
-    "serviceTier",
-    "service_tier",
-    "webSearch",
-    "web_search",
-    "mcpServers",
-    "mcp_servers",
-    "plugins",
-    "hooks",
-    "features",
-    "agentControl",
-    "agent_control",
-    "tools",
-    "browserUse",
-    "browser_use",
-    "computerUse",
-    "computer_use",
-    "desktop",
+_UNSET = object()
+
+
+@dataclass(frozen=True, slots=True)
+class _ReviewedRuntimeSetting:
+    """One exact, reviewed value rule for the pinned Codex surface."""
+
+    classification: str
+    expected: Any = _UNSET
+    allowed_values: tuple[Any, ...] = ()
+    allowed_types: tuple[type[Any], ...] = ()
+
+
+_CONFIG_KEY_ALIASES = {
+    "approvalPolicy": "approval_policy",
+    "sandboxMode": "sandbox_mode",
+    "webSearch": "web_search",
+    "mcpServers": "mcp_servers",
+    "agentControl": "agent_control",
+    "cliAuthCredentialsStore": "cli_auth_credentials_store",
+    "mcpOAuthCredentialsStore": "mcp_oauth_credentials_store",
+    "allowLoginShell": "allow_login_shell",
+    "backgroundTerminalMaxTimeout": "background_terminal_max_timeout",
+    "chatgptBaseUrl": "chatgpt_base_url",
+    "fileOpener": "file_opener",
+    "hideAgentReasoning": "hide_agent_reasoning",
+    "includeAppsInstructions": "include_apps_instructions",
+    "includeCollaborationModeInstructions": "include_collaboration_mode_instructions",
+    "includeEnvironmentContext": "include_environment_context",
+    "includePermissionsInstructions": "include_permissions_instructions",
+    "modelProviders": "model_providers",
+    "projectDocFallbackFilenames": "project_doc_fallback_filenames",
+    "projectDocMaxBytes": "project_doc_max_bytes",
+    "projectRootMarkers": "project_root_markers",
+    "shellEnvironmentPolicy": "shell_environment_policy",
+}
+
+
+def _canonical_config_key(key: str) -> str:
+    return _CONFIG_KEY_ALIASES.get(key, key)
+
+
+_REVIEWED_CONFIG_SETTINGS: dict[str, _ReviewedRuntimeSetting] = {
+    # These three values are the M6 permission ceiling and must be explicit.
+    "approval_policy": _ReviewedRuntimeSetting("required", expected="never"),
+    "sandbox_mode": _ReviewedRuntimeSetting("required", expected="read-only"),
+    "web_search": _ReviewedRuntimeSetting("required", expected="disabled"),
+    # The remaining entries are the exact effective defaults captured from the
+    # pinned runtime. A changed value is a policy change, not an implicit allow.
+    "allow_login_shell": _ReviewedRuntimeSetting("allowed_optional", expected=True),
+    "background_terminal_max_timeout": _ReviewedRuntimeSetting("allowed_optional", expected=300000),
+    "chatgpt_base_url": _ReviewedRuntimeSetting(
+        "allowed_optional", expected="https://chatgpt.com/backend-api/"
+    ),
+    "cli_auth_credentials_store": _ReviewedRuntimeSetting("allowed_optional", expected="file"),
+    "file_opener": _ReviewedRuntimeSetting("inert_metadata", expected="vscode"),
+    "hide_agent_reasoning": _ReviewedRuntimeSetting("inert_metadata", expected=False),
+    "history": _ReviewedRuntimeSetting(
+        "inert_metadata", expected={"max_bytes": None, "persistence": "save-all"}
+    ),
+    "include_apps_instructions": _ReviewedRuntimeSetting("inert_metadata", expected=True),
+    "include_collaboration_mode_instructions": _ReviewedRuntimeSetting(
+        "inert_metadata", expected=True
+    ),
+    "include_environment_context": _ReviewedRuntimeSetting("inert_metadata", expected=True),
+    "include_permissions_instructions": _ReviewedRuntimeSetting("inert_metadata", expected=True),
+    "marketplaces": _ReviewedRuntimeSetting("allowed_optional", expected={}),
+    "mcp_oauth_credentials_store": _ReviewedRuntimeSetting("allowed_optional", expected="auto"),
+    "mcp_servers": _ReviewedRuntimeSetting("required", expected={}),
+    "model": _ReviewedRuntimeSetting("allowed_optional", allowed_types=(str,)),
+    "model_providers": _ReviewedRuntimeSetting("allowed_optional", expected={}),
+    "plugins": _ReviewedRuntimeSetting("required", expected={}),
+    "profiles": _ReviewedRuntimeSetting("allowed_optional", expected={}),
+    "project_doc_fallback_filenames": _ReviewedRuntimeSetting("inert_metadata", expected=[]),
+    "project_doc_max_bytes": _ReviewedRuntimeSetting("inert_metadata", expected=32768),
+    "project_root_markers": _ReviewedRuntimeSetting("inert_metadata", expected=[".git"]),
+    "shell_environment_policy": _ReviewedRuntimeSetting(
+        "allowed_optional",
+        expected={
+            "exclude": None,
+            "experimental_use_profile": None,
+            "filters": None,
+            "ignore_default_excludes": None,
+            "include_only": None,
+            "inherit": None,
+            "set": None,
+        },
+    ),
+    # An empty object is the only accepted value for these capability-shaped
+    # settings. Their non-empty forms remain explicitly unsupported below.
+    "agent_control": _ReviewedRuntimeSetting("forbidden", allowed_values=(False, {})),
+    "browser_use": _ReviewedRuntimeSetting("forbidden", allowed_values=(False, {}, [])),
+    "computer_use": _ReviewedRuntimeSetting("forbidden", allowed_values=(False, {}, [])),
+    "desktop": _ReviewedRuntimeSetting("forbidden", allowed_values=(False, {}, [])),
+    "hooks": _ReviewedRuntimeSetting("forbidden", allowed_values=(False, {}, [])),
+    "tools": _ReviewedRuntimeSetting("forbidden", allowed_values=(False, {}, [])),
+}
+
+
+_REVIEWED_FEATURE_SETTINGS: dict[str, _ReviewedRuntimeSetting] = {
+    # M6 has no nested agents or ambient integrations. These are explicit
+    # deny rules; a missing key is handled separately for the effective map.
+    "api_key_model_discovery": _ReviewedRuntimeSetting("allowed_optional", expected=False),
+    "auth_elicitation": _ReviewedRuntimeSetting("forbidden", expected=False),
+    "background_paginated_rollout_migration": _ReviewedRuntimeSetting(
+        "inert_metadata", expected=False
+    ),
+    "codex_apps_mcp_2026_07_28": _ReviewedRuntimeSetting("forbidden", expected=False),
+    "mcp_2026_07_28": _ReviewedRuntimeSetting("forbidden", expected=False),
+    "memories": _ReviewedRuntimeSetting("forbidden", expected=False),
+    "mentions_v2": _ReviewedRuntimeSetting("forbidden", expected=False),
+    "multi_agent": _ReviewedRuntimeSetting("forbidden", expected=False),
+    "network_proxy": _ReviewedRuntimeSetting("inert_metadata", expected=None),
+    "remote_control": _ReviewedRuntimeSetting("forbidden", expected=False),
+    "remote_plugin": _ReviewedRuntimeSetting("forbidden", expected=False),
+    "tool_suggest": _ReviewedRuntimeSetting("forbidden", expected=False),
+    "windows_sandbox_service": _ReviewedRuntimeSetting("inert_metadata", expected=False),
 }
 _SECRET_KEY = re.compile(r"(?i)(token|secret|password|api[_-]?key|credential|private[_-]?key)")
 _INLINE_SECRET = re.compile(
@@ -2029,11 +2101,28 @@ class CodexBackend:
 
     @staticmethod
     def _configuration_issues(config: Any, layers: list[Any]) -> list[PreflightIssue]:
+        """Apply the reviewed, value-sensitive policy to config/read output.
+
+        The pinned SDK permits extra configuration keys, and the runtime can
+        also return default-valued fields that are absent from the dedicated
+        TOML. Every accepted field therefore needs an exact rule here. A key
+        that is merely known to the SDK is not automatically accepted.
+        """
+
+        def valid_value(rule: _ReviewedRuntimeSetting, candidate: Any) -> bool:
+            if rule.expected is not _UNSET:
+                return candidate == rule.expected
+            if rule.allowed_values and candidate not in rule.allowed_values:
+                return False
+            return not rule.allowed_types or isinstance(candidate, rule.allowed_types)
+
         issues: list[PreflightIssue] = []
         entries = [
             ("effective", config),
             *((f"layer_{index}", layer) for index, layer in enumerate(layers)),
         ]
+        known_keys = set(_REVIEWED_CONFIG_SETTINGS) | {"features"}
+        feature_aliases = {"multiAgent": "multi_agent"}
         for label, value in entries:
             if not isinstance(value, dict):
                 issues.append(
@@ -2044,7 +2133,10 @@ class CodexBackend:
                     )
                 )
                 continue
-            unknown = set(value) - _SAFE_CONFIG_KEYS
+
+            unknown = sorted(
+                key for key in value if _canonical_config_key(str(key)) not in known_keys
+            )
             if unknown:
                 active_unknown = sorted(
                     key for key in unknown if value[key] not in (None, False, "", [], {}, 0)
@@ -2054,21 +2146,41 @@ class CodexBackend:
                         code="config_layer_has_unreviewed_keys",
                         message=(
                             f"Codex {label} configuration contains unreviewed capability keys: "
-                            f"{', '.join(sorted(unknown))}; active: "
+                            f"{', '.join(unknown)}; active: "
                             f"{', '.join(active_unknown) or 'none'}"
                         ),
                         setting="config/read",
                     )
                 )
-            for key in (
-                "mcpServers",
-                "mcp_servers",
-                "plugins",
-                "hooks",
-                "agentControl",
-                "agent_control",
-            ):
-                if value.get(key):
+
+            canonical_values = {
+                _canonical_config_key(str(key)): item for key, item in value.items()
+            }
+            for canonical_key, candidate in canonical_values.items():
+                if canonical_key == "features":
+                    continue
+                rule = _REVIEWED_CONFIG_SETTINGS.get(canonical_key)
+                if rule is None or valid_value(rule, candidate):
+                    continue
+                if canonical_key in {"approval_policy"}:
+                    issues.append(
+                        PreflightIssue(
+                            code="approval_policy_not_deny_all",
+                            message=(
+                                f"Codex {label} configuration has a non-deny-all approval policy"
+                            ),
+                            setting=canonical_key,
+                        )
+                    )
+                elif canonical_key == "sandbox_mode":
+                    issues.append(
+                        PreflightIssue(
+                            code="sandbox_config_not_read_only",
+                            message=f"Codex {label} configuration is not read-only",
+                            setting=canonical_key,
+                        )
+                    )
+                elif canonical_key in {"mcp_servers", "plugins", "hooks", "agent_control"}:
                     issues.append(
                         PreflightIssue(
                             code="integration_or_delegation_configured",
@@ -2076,42 +2188,104 @@ class CodexBackend:
                                 f"Codex {label} configuration enables an unsupported integration "
                                 "or delegation feature"
                             ),
-                            setting=key,
+                            setting=canonical_key,
                         )
                     )
-            features = value.get("features")
-            if features:
-                if not isinstance(features, dict) or set(features) - {"multi_agent", "multiAgent"}:
-                    unknown_features = (
-                        sorted(set(features) - {"multi_agent", "multiAgent"})
-                        if isinstance(features, dict)
-                        else []
-                    )
-                    active_features = (
-                        [
-                            key
-                            for key in unknown_features
-                            if features[key] not in (None, False, "", [], {}, 0)
-                        ]
-                        if isinstance(features, dict)
-                        else []
-                    )
+                elif canonical_key in {"browser_use", "computer_use", "desktop", "tools"}:
                     issues.append(
                         PreflightIssue(
-                            code="unreviewed_runtime_features",
+                            code="unverified_tool_configuration",
                             message=(
-                                f"Codex {label} configuration contains unreviewed runtime features"
-                                + (f": {', '.join(unknown_features)}" if unknown_features else "")
-                                + (
-                                    f"; enabled: {', '.join(active_features)}"
-                                    if active_features
-                                    else "; enabled: none"
-                                )
+                                f"Codex {label} configuration includes tools outside the "
+                                "validated M6 set"
                             ),
-                            setting="features",
+                            setting=canonical_key,
                         )
                     )
-                elif features.get("multi_agent", features.get("multiAgent")) is not False:
+                else:
+                    issues.append(
+                        PreflightIssue(
+                            code="reviewed_config_value_unacceptable",
+                            message=(
+                                f"Codex {label} configuration value for {canonical_key} is "
+                                "outside the reviewed M6 policy"
+                            ),
+                            setting=canonical_key,
+                        )
+                    )
+
+            if label == "effective":
+                for required_key in ("approval_policy", "sandbox_mode", "web_search"):
+                    if required_key not in canonical_values:
+                        issue_code = {
+                            "approval_policy": "approval_policy_not_deny_all",
+                            "sandbox_mode": "sandbox_config_not_read_only",
+                            "web_search": "web_search_policy_unverified",
+                        }[required_key]
+                        issues.append(
+                            PreflightIssue(
+                                code=issue_code,
+                                message=(
+                                    f"Codex effective configuration does not explicitly set "
+                                    f"{required_key}"
+                                ),
+                                setting=required_key,
+                            )
+                        )
+
+            features = canonical_values.get("features")
+            if features is None:
+                if label == "effective":
+                    issues.append(
+                        PreflightIssue(
+                            code="nested_agent_policy_unverified",
+                            message=(
+                                "Codex effective configuration does not explicitly disable "
+                                "nested agents"
+                            ),
+                            setting="features.multi_agent",
+                        )
+                    )
+                continue
+            if not isinstance(features, dict):
+                issues.append(
+                    PreflightIssue(
+                        code="unreviewed_runtime_features",
+                        message=f"Codex {label} runtime features are not a readable object",
+                        setting="features",
+                    )
+                )
+                continue
+
+            unknown_features = sorted(
+                key
+                for key in features
+                if feature_aliases.get(str(key), str(key)) not in _REVIEWED_FEATURE_SETTINGS
+            )
+            if unknown_features:
+                active_features = sorted(
+                    key
+                    for key in unknown_features
+                    if features[key] not in (None, False, "", [], {}, 0)
+                )
+                issues.append(
+                    PreflightIssue(
+                        code="unreviewed_runtime_features",
+                        message=(
+                            f"Codex {label} configuration contains unreviewed runtime features: "
+                            f"{', '.join(unknown_features)}; enabled: "
+                            f"{', '.join(active_features) or 'none'}"
+                        ),
+                        setting="features",
+                    )
+                )
+
+            for feature_key, candidate in features.items():
+                canonical_feature = feature_aliases.get(str(feature_key), str(feature_key))
+                rule = _REVIEWED_FEATURE_SETTINGS.get(canonical_feature)
+                if rule is None or valid_value(rule, candidate):
+                    continue
+                if canonical_feature == "multi_agent":
                     issues.append(
                         PreflightIssue(
                             code="nested_agent_policy_unverified",
@@ -2122,43 +2296,19 @@ class CodexBackend:
                             setting="features.multi_agent",
                         )
                     )
-            elif label == "effective":
-                issues.append(
-                    PreflightIssue(
-                        code="nested_agent_policy_unverified",
-                        message=(
-                            "Codex effective configuration does not explicitly disable nested "
-                            "agents"
-                        ),
-                        setting="features.multi_agent",
-                    )
-                )
-            for key in (
-                "browserUse",
-                "browser_use",
-                "computerUse",
-                "computer_use",
-                "desktop",
-                "tools",
-            ):
-                configured = value.get(key)
-                if (
-                    configured is not None
-                    and configured is not False
-                    and configured != {}
-                    and configured != []
-                ):
+                else:
                     issues.append(
                         PreflightIssue(
-                            code="unverified_tool_configuration",
+                            code="forbidden_runtime_feature_enabled",
                             message=(
-                                f"Codex {label} configuration includes tools outside the "
-                                "validated M6 set"
+                                f"Codex {label} runtime feature {canonical_feature} is outside "
+                                "the M6 permission ceiling"
                             ),
-                            setting=key,
+                            setting=f"features.{canonical_feature}",
                         )
                     )
-            search = value.get("webSearch", value.get("web_search"))
+
+            search = canonical_values.get("web_search")
             if search is not None and search != "disabled" and search is not False:
                 issues.append(
                     PreflightIssue(
@@ -2175,24 +2325,6 @@ class CodexBackend:
                             "Codex effective configuration does not explicitly disable web search"
                         ),
                         setting="web_search",
-                    )
-                )
-            approval = value.get("approvalPolicy", value.get("approval_policy"))
-            if approval is not None and approval != "never":
-                issues.append(
-                    PreflightIssue(
-                        code="approval_policy_not_deny_all",
-                        message=f"Codex {label} configuration has a non-deny-all approval policy",
-                        setting="approval_policy",
-                    )
-                )
-            sandbox = value.get("sandboxMode", value.get("sandbox_mode"))
-            if sandbox is not None and sandbox != "read-only":
-                issues.append(
-                    PreflightIssue(
-                        code="sandbox_config_not_read_only",
-                        message=f"Codex {label} configuration is not read-only",
-                        setting="sandbox_mode",
                     )
                 )
         return issues

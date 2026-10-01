@@ -297,7 +297,9 @@ async def test_codex_live_one_short_read_only_turn(live_backend) -> None:
         async with asyncio.timeout(90):
             handle, _ = await _prepare_live_attempt(backend, context, ledger, spec, stamp, persist)
             events = [event async for event in backend.events(handle)]
-        assert any(isinstance(event, WorkerTerminalEvent) for event in events)
+        assert any(isinstance(event, WorkerTerminalEvent) for event in events), [
+            event.model_dump(mode="json") for event in events
+        ]
     finally:
         if handle is not None:
             receipt = await backend.close(handle)

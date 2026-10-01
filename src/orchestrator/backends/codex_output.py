@@ -7,8 +7,6 @@ from hashlib import sha256
 from typing import Literal
 from uuid import NAMESPACE_URL, uuid5
 
-from pydantic import Field
-
 from orchestrator.artifacts import ArtifactStore
 from orchestrator.domain.backend import ArtifactEntry, OutputStatus, WorkerResult
 from orchestrator.domain.models import AgentRunSpec, FrozenModel, NonEmpty
@@ -25,7 +23,9 @@ class CodexReadOnlyReport(FrozenModel):
     schema_version: Literal[1]
     status: Literal["pass", "fail", "blocked"]
     summary: NonEmpty
-    findings: tuple[NonEmpty, ...] = Field(default_factory=tuple)
+    # Codex's strict response-format validator requires every declared
+    # property to appear in the JSON Schema `required` array.
+    findings: tuple[NonEmpty, ...]
 
 
 def retain_read_only_report(

@@ -33,7 +33,8 @@
   "required": [
     "schema_version",
     "status",
-    "summary"
+    "summary",
+    "findings"
   ],
   "title": "CodexReadOnlyReport",
   "type": "object"

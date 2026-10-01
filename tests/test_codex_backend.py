@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 
 from orchestrator.backends.codex import CodexBackend
+from orchestrator.backends.codex_output import CodexReadOnlyReport
 from orchestrator.backends.fake import AttemptScript, FakeBackend, FakeClock
 from orchestrator.domain.backend import (
     BackendPreflightSnapshot,
@@ -154,6 +155,32 @@ def test_alternate_service_owned_capabilities_fixture_is_explicit_and_bounded(re
     builtin_tools = capabilities["codex_builtin_tools"]
     assert builtin_tools["state"] == "unsupported"
     assert builtin_tools["execution_owner"] is None
+
+
+def test_pinned_codex_config_read_fixture_is_fully_reviewed(repo_root) -> None:
+    fixture = json.loads(
+        (repo_root / "tests/fixtures/backends/codex-config-read-0.159.2.json").read_text()
+    )
+
+    assert fixture["provider_traffic"] is False
+    assert (
+        CodexBackend._configuration_issues(
+            fixture["effective_config"], [item["config"] for item in fixture["layers"]]
+        )
+        == []
+    )
+
+    registry = (
+        repo_root / "tests/fixtures/backends" / fixture["feature_registry_fixture"]
+    ).read_text()
+    assert "apps                                     stable             true" in registry
+    assert "auth_elicitation                         stable             false" in registry
+    assert "remote_plugin                            stable             false" in registry
+
+
+def test_codex_output_schema_requires_every_declared_property() -> None:
+    schema = CodexReadOnlyReport.model_json_schema()
+    assert set(schema["required"]) == set(schema["properties"])
 
 
 @pytest.mark.asyncio
