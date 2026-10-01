@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Literal
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import Field, model_validator
 
@@ -18,6 +18,11 @@ from orchestrator.domain.models import (
     NonEmpty,
     StrictModel,
 )
+
+
+def derive_lifecycle_owner_id(preparation_id: str) -> str:
+    """Return a stable provider-neutral owner intent ID for one preparation."""
+    return str(uuid5(NAMESPACE_URL, f"orchestrator-lifecycle-owner:{preparation_id}"))
 
 
 class OutputStatus(StrEnum):
@@ -138,6 +143,7 @@ class PreflightContext(FrozenModel):
     project_path: NonEmpty
     required_outputs: tuple[NonEmpty, ...]
     binding_id: NonEmpty | None = None
+    lifecycle_owner_id: NonEmpty | None = None
 
 
 class PreflightResult(StrictModel):

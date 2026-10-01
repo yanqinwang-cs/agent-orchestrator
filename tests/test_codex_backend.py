@@ -76,9 +76,10 @@ def _settings() -> CodexBackendSettings:
 
 
 async def test_codex_preflight_fails_closed_without_host_compatibility_evidence(
-    repo_root,
+    repo_root, monkeypatch, tmp_path
 ) -> None:
     fixture = json.loads((repo_root / "tests/fixtures/backends/codex-sdk-0.159.2.json").read_text())
+    monkeypatch.delenv("ORCHESTRATOR_CODEX_HOME", raising=False)
     client_factory_calls = 0
 
     def client_factory():
@@ -92,7 +93,7 @@ async def test_codex_preflight_fails_closed_without_host_compatibility_evidence(
         PreflightContext(
             preparation_id="prep-1",
             record_id="record-1",
-            project_path="/tmp/project",
+            project_path=str(tmp_path / "project"),
             required_outputs=("review_report",),
             binding_id="codex-reviewer",
         ),
@@ -100,9 +101,10 @@ async def test_codex_preflight_fails_closed_without_host_compatibility_evidence(
 
     assert result.accepted is False
     assert {issue.code for issue in result.issues} >= {
-        "sanitized_launch_unverified",
-        "process_settlement_unverified",
-        "effective_policy_unverified",
+        "dedicated_codex_home_missing",
+        "artifact_retention_unavailable",
+        "output_contract_unsupported",
+        "project_path_unavailable",
     }
     assert result.snapshot is not None
     runtime_facts = {fact.key: fact for fact in result.snapshot.runtime}
@@ -155,7 +157,7 @@ def test_alternate_service_owned_capabilities_fixture_is_explicit_and_bounded(re
 
 
 @pytest.mark.asyncio
-async def test_codex_preflight_rejects_write_requests_before_sdk_client_creation() -> None:
+async def test_codex_preflight_rejects_write_requests_before_sdk_client_creation(tmp_path) -> None:
     client_factory_calls = 0
 
     def client_factory():
@@ -172,7 +174,7 @@ async def test_codex_preflight_rejects_write_requests_before_sdk_client_creation
         PreflightContext(
             preparation_id="prep-write",
             record_id="record-write",
-            project_path="/tmp/project",
+            project_path=str(tmp_path),
             required_outputs=("report",),
             binding_id="codex-reviewer",
         ),

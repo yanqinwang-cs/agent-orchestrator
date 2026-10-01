@@ -772,6 +772,7 @@ class EventKind(StrEnum):
     TIMEOUT_DETECTED = "timeout_detected"
     OUTBOX_STATUS_CHANGED = "outbox_status_changed"
     RESERVATION_STATUS_CHANGED = "reservation_status_changed"
+    BACKEND_PREPARATION_INTENT_RECORDED = "backend_preparation_intent_recorded"
     ARTIFACT_RECORDED = "artifact_recorded"
     HANDOFF_RECORDED = "handoff_recorded"
     DECISION_REQUESTED = "decision_requested"
@@ -936,6 +937,15 @@ class BackendPreflightRecordedEvent(EventBase):
     accepted: bool
 
 
+class BackendPreparationIntentRecordedEvent(EventBase):
+    kind: Literal[EventKind.BACKEND_PREPARATION_INTENT_RECORDED]
+    action_id: UUID
+    attempt_id: NonEmpty
+    preparation_id: NonEmpty
+    lifecycle_owner_id: NonEmpty
+    attempt_spec_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 type Event = Annotated[
     RunStatusChangedEvent
     | StageStatusChangedEvent
@@ -950,6 +960,7 @@ type Event = Annotated[
     | ArtifactRecordedEvent
     | HandoffRecordedEvent
     | DecisionLifecycleEvent
+    | BackendPreparationIntentRecordedEvent
     | BackendPreflightRecordedEvent,
     Field(discriminator="kind"),
 ]

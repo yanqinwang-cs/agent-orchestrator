@@ -13,5 +13,59 @@
     "platform": "macOS-arm64",
     "sha256": "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
   },
-  "notes": "Local bundled binary version and hash were inspected; this fixture is not captured live execution evidence."
+  "offline_lifecycle": [
+    {
+      "case": "preparation_owner_intent",
+      "expected": "owner_identity_is_journaled_with_attempt_reservation_and_dispatch_before_process_creation"
+    },
+    {
+      "case": "preflight_before_turn",
+      "expected": "accepted_snapshot_is_persisted_before_one_turn_start"
+    },
+    {
+      "case": "early_notification",
+      "expected": "sdk_notification_queue_preserves_notification_until_one_consumer_reads_it"
+    },
+    {
+      "case": "unknown_notification_raw_identity",
+      "expected": "raw_sdk_ids_are_correlated_and_unknown_payload_content_is_not_retained"
+    },
+    {
+      "case": "turn_completion",
+      "expected": "exact_thread_turn_output_is_retained_after_independent_owner_settlement"
+    },
+    {
+      "case": "failed_terminal",
+      "expected": "provider_failure_is_normalized_only_after_owner_settlement"
+    },
+    {
+      "case": "exact_turn_interrupt",
+      "expected": "one_exact_thread_turn_interrupt_and_idempotent_command_receipt"
+    },
+    {
+      "case": "foreign_owner_interrupt",
+      "expected": "sibling_thread_and_turn_are_rejected_without_sdk_control_call"
+    },
+    {
+      "case": "unacknowledged_interrupt",
+      "expected": "uncertain_delivery_is_not_replayed"
+    },
+    {
+      "case": "owner_process_group",
+      "expected": "server_and_same_group_child_are_reaped_before_settled_receipt"
+    },
+    {
+      "case": "service_parent_exit",
+      "expected": "independent_owner_detects_parent_loss_and_settles_child"
+    },
+    {
+      "case": "wrong_owner_generation",
+      "expected": "status_and_recovery_reject_owner_generation_mismatch"
+    },
+    {
+      "case": "fresh_reader_interrupted_history",
+      "expected": "unknown_without_original_owner_and_terminal_receipt"
+    }
+  ],
+  "notes": "SDK and CLI identity were inspected locally. Lifecycle cases are synthetic offline fixtures, not captured live execution evidence."
 }

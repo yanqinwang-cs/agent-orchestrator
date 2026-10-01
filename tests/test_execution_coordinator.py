@@ -23,6 +23,7 @@ from orchestrator.domain.backend import (
     ShutdownReceipt,
     WorkerResult,
     WorkerTerminalEvent,
+    derive_lifecycle_owner_id,
 )
 from orchestrator.domain.decisions import (
     DecisionDispositionReason,
@@ -33,6 +34,7 @@ from orchestrator.domain.decisions import (
 )
 from orchestrator.domain.models import (
     AttemptStatus,
+    BackendPreparationIntentRecordedEvent,
     Effort,
     FailureClass,
     InterventionKind,
@@ -270,6 +272,43 @@ async def test_all_shipped_workflows_complete_offline(
         for selection in spec.selections
         if stage_status[selection.stage_id] == StageStatus.SUCCEEDED
     )
+
+
+def test_backend_preparation_owner_intent_commits_with_attempt_reservation_and_dispatch(
+    tmp_path, app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "review", "preparation-owner-intent")
+
+    class PreflightBackend(FakeBackend):
+        requires_preflight_record = True
+
+    backend = PreflightBackend(
+        backend_id="codex",
+        script_factory=_worker_script,
+        auto_release=True,
+    )
+    coordinator = ExecutionCoordinator(ledger, backend, ownership, clock=FakeClock(origin=STAMP))
+
+    assert coordinator.advance("preparation-owner-intent")
+
+    attempts = ledger.list_attempts("preparation-owner-intent")
+    actions = ledger.list_outbox_actions("preparation-owner-intent")
+    assert len(attempts) == len(actions) == 1
+    attempt = attempts[0]
+    action = actions[0]
+    expected_owner_id = derive_lifecycle_owner_id(str(action.action_id))
+    assert attempt.state.worker_lifecycle_owner_id == expected_owner_id
+    intent = next(
+        event
+        for event in ledger.list_events("preparation-owner-intent")
+        if isinstance(event, BackendPreparationIntentRecordedEvent)
+    )
+    assert intent.action_id == action.action_id
+    assert intent.attempt_id == attempt.spec.attempt_id
+    assert intent.preparation_id == str(action.action_id)
+    assert intent.lifecycle_owner_id == expected_owner_id
+    assert intent.attempt_spec_hash == content_hash(canonical_json(attempt.spec))
 
 
 @pytest.mark.asyncio

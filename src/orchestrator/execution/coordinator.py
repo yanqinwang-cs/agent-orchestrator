@@ -33,6 +33,7 @@ from orchestrator.domain.backend import (
     WorkerResult,
     WorkerStartedEvent,
     WorkerTerminalEvent,
+    derive_lifecycle_owner_id,
 )
 from orchestrator.domain.decisions import (
     DecisionDisposition,
@@ -58,6 +59,7 @@ from orchestrator.domain.models import (
     AttemptState,
     AttemptStatus,
     BackendPreflightRecordedEvent,
+    BackendPreparationIntentRecordedEvent,
     Condition,
     DecisionLifecycleEvent,
     Event,
@@ -484,6 +486,8 @@ class ExecutionCoordinator:
             return 0
         preflight = None
         try:
+            if self._requires_backend_preflight_record():
+                attempt = self._ensure_backend_preparation_intent(action, attempt)
             context = self._preflight_context(action, attempt)
             preflight = await asyncio.wait_for(
                 self.backend.preflight(attempt.spec, context),
@@ -504,12 +508,31 @@ class ExecutionCoordinator:
                         "backend preflight snapshot belongs to another preparation",
                         safe_to_retry=False,
                     )
+                if (
+                    self._requires_backend_preflight_record()
+                    and (preflight.accepted or preflight.prepared_handle is not None)
+                    and (
+                        preflight.snapshot.owner_id != context.lifecycle_owner_id
+                        or (
+                            preflight.prepared_handle is not None
+                            and preflight.prepared_handle.lifecycle_owner_id
+                            != context.lifecycle_owner_id
+                        )
+                    )
+                ):
+                    self._mark_unknown_launch(
+                        action.action_id,
+                        self.ledger.get_attempt(attempt_id),
+                        "Codex prepared owner does not match its committed lifecycle owner intent",
+                    )
+                    return 0
                 preflight_record = self._persist_backend_preflight(
                     action,
                     attempt,
                     context,
                     preflight.accepted,
                     preflight.snapshot,
+                    preflight.prepared_handle,
                 )
             elif self._requires_backend_preflight_record():
                 raise KnownPrelaunchFailure(
@@ -700,13 +723,64 @@ class ExecutionCoordinator:
         if stage is None:
             raise LedgerInvariantError(f"attempt references missing stage {attempt.stage_id}")
         outputs = tuple(dict.fromkeys((*profile.required_outputs, *stage.required_outputs)))
+        if (
+            self._requires_backend_preflight_record()
+            and not attempt.state.worker_lifecycle_owner_id
+        ):
+            raise LedgerInvariantError(
+                "Codex launch is missing its committed preparation owner intent"
+            )
         return PreflightContext(
             preparation_id=str(action.action_id),
             record_id=str(uuid5(NAMESPACE_URL, f"backend-preflight:{action.action_id}")),
             project_path=run.project_config.path,
             required_outputs=outputs,
             binding_id=profile.model_binding,
+            lifecycle_owner_id=attempt.state.worker_lifecycle_owner_id,
         )
+
+    def _ensure_backend_preparation_intent(
+        self, action: OutboxAction, attempt: PersistedAttempt
+    ) -> PersistedAttempt:
+        """Durably bind legacy pending launches before any backend preflight side effect."""
+        preparation_id = str(action.action_id)
+        owner_id = derive_lifecycle_owner_id(preparation_id)
+        if attempt.state.worker_lifecycle_owner_id == owner_id:
+            return attempt
+        if attempt.state.worker_lifecycle_owner_id is not None:
+            raise LedgerInvariantError("attempt has a conflicting lifecycle owner intent")
+        event = BackendPreparationIntentRecordedEvent(
+            event_id=uuid4(),
+            run_id=action.run_id,
+            occurred_at=self._now(),
+            actor=self.actor,
+            kind=EventKind.BACKEND_PREPARATION_INTENT_RECORDED,
+            action_id=action.action_id,
+            attempt_id=attempt.spec.attempt_id,
+            preparation_id=preparation_id,
+            lifecycle_owner_id=owner_id,
+            attempt_spec_hash=content_hash(canonical_json(attempt.spec)),
+        )
+
+        def build(run: PersistedRun) -> LedgerMutation:
+            current = self.ledger.get_attempt(attempt.spec.attempt_id)
+            if current.spec != attempt.spec:
+                raise LedgerInvariantError("attempt specification changed before preparation")
+            if current.state.worker_lifecycle_owner_id not in {None, owner_id}:
+                raise LedgerInvariantError("attempt has a conflicting lifecycle owner intent")
+            updated = current.state.model_copy(update={"worker_lifecycle_owner_id": owner_id})
+            return LedgerMutation(
+                command_id=uuid4(),
+                run_id=run.run_id,
+                expected_revision=run.state.revision,
+                actor=self.actor,
+                occurred_at=event.occurred_at,
+                attempt_updates=(updated,),
+                events=(event,),
+            )
+
+        self._commit(action.run_id, build)
+        return self.ledger.get_attempt(attempt.spec.attempt_id)
 
     def _persist_backend_preflight(
         self,
@@ -715,6 +789,7 @@ class ExecutionCoordinator:
         context: PreflightContext,
         accepted: bool,
         snapshot: BackendPreflightSnapshot,
+        prepared_handle: WorkerHandle | None = None,
     ) -> BackendPreflightRecord:
         occurred_at = self._now()
         record = BackendPreflightRecord(
@@ -749,12 +824,34 @@ class ExecutionCoordinator:
             current = self.ledger.get_attempt(attempt.spec.attempt_id)
             if current.spec != attempt.spec:
                 raise LedgerInvariantError("attempt specification changed after preflight")
+            if current.state.worker_lifecycle_owner_id not in {
+                None,
+                context.lifecycle_owner_id,
+            }:
+                raise LedgerInvariantError("preflight owner differs from its durable owner intent")
+            if prepared_handle is not None and current.state.worker_lifecycle_owner_id not in {
+                None,
+                prepared_handle.lifecycle_owner_id,
+            }:
+                raise LedgerInvariantError("prepared owner differs from its durable owner intent")
             if current.state.backend_preflight_record_id not in {None, record.record_id}:
                 raise LedgerInvariantError("attempt already has a different preflight record")
             updated = current.state.model_copy(
                 update={
                     "backend_preflight_record_id": record.record_id,
                     "backend_preflight_record_hash": record.record_hash,
+                    **(
+                        {
+                            "worker_handle_id": prepared_handle.handle_id,
+                            "worker_backend_version": prepared_handle.backend_version,
+                            "worker_session_id": prepared_handle.session_id,
+                            "worker_thread_id": prepared_handle.thread_id,
+                            "worker_turn_id": None,
+                            "worker_lifecycle_owner_id": prepared_handle.lifecycle_owner_id,
+                        }
+                        if prepared_handle is not None
+                        else {}
+                    ),
                 }
             )
             return LedgerMutation(
@@ -1511,7 +1608,9 @@ class ExecutionCoordinator:
             turn_id=state.worker_turn_id,
             lifecycle_owner_id=state.worker_lifecycle_owner_id,
         )
-        if not state.worker_handle_id or not state.worker_lifecycle_owner_id:
+        if not state.worker_lifecycle_owner_id or (
+            not state.worker_handle_id and not self._requires_backend_preflight_record()
+        ):
             reconciliation = Reconciliation(
                 known=False,
                 detail="persisted worker identity is incomplete; inspection was not attempted",
@@ -3179,6 +3278,11 @@ class ExecutionCoordinator:
                     "worker_lifecycle_owner_id": handle.lifecycle_owner_id,
                 }
             )
+            if current.state.worker_lifecycle_owner_id not in {
+                None,
+                handle.lifecycle_owner_id,
+            }:
+                raise LedgerInvariantError("launched worker differs from its durable owner intent")
             run_status = run.state.status
             if run_status in {RunStatus.READY, RunStatus.RUNNING}:
                 run_status = RunStatus.RUNNING
@@ -3324,6 +3428,28 @@ class ExecutionCoordinator:
             )
             action_id = uuid4()
             action_key = f"launch:{attempt_id}"
+            preparation_id = str(action_id)
+            lifecycle_owner_id = (
+                derive_lifecycle_owner_id(preparation_id)
+                if self._requires_backend_preflight_record()
+                else None
+            )
+            preparation_event = (
+                BackendPreparationIntentRecordedEvent(
+                    event_id=uuid4(),
+                    run_id=run.run_id,
+                    occurred_at=self._now(),
+                    actor=self.actor,
+                    kind=EventKind.BACKEND_PREPARATION_INTENT_RECORDED,
+                    action_id=action_id,
+                    attempt_id=attempt_id,
+                    preparation_id=preparation_id,
+                    lifecycle_owner_id=lifecycle_owner_id,
+                    attempt_spec_hash=content_hash(canonical_json(spec)),
+                )
+                if lifecycle_owner_id is not None
+                else None
+            )
             active_stages = sorted(
                 {
                     *run.state.active_stages,
@@ -3353,6 +3479,7 @@ class ExecutionCoordinator:
                             attempt_id=attempt_id,
                             status=AttemptStatus.LAUNCHING,
                             effective_input_revision=content_hash(canonical_json(inputs)),
+                            worker_lifecycle_owner_id=lifecycle_owner_id,
                         ),
                     ),
                 ),
@@ -3368,6 +3495,7 @@ class ExecutionCoordinator:
                         },
                     ),
                 ),
+                events=(preparation_event,) if preparation_event is not None else (),
                 reservations=reservations,
             )
             receipt = self.ledger.apply(mutation)
