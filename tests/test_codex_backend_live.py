@@ -145,6 +145,35 @@ def _persist_preflight(ledger, spec, preflight, context, occurred_at):
     return record.record_id, record.record_hash
 
 
+def _preflight_diagnostics(preflight) -> str:
+    issues = (
+        "; ".join(f"{issue.code}[{issue.setting}]: {issue.message}" for issue in preflight.issues)
+        or "no issue details"
+    )
+    snapshot = preflight.snapshot
+    if snapshot is None:
+        return issues
+    selected = {
+        "runtime": {
+            "initialize_server_name",
+            "initialize_server_version",
+            "initialize_identity_source",
+            "sdk_version",
+            "cli_version",
+            "cli_package_version",
+        },
+        "binding": {"requested_model", "requested_effort", "supported_efforts"},
+        "auth": {"auth_available", "auth_method", "auth_checked"},
+    }
+    facts = {
+        section: {
+            fact.key: fact.value for fact in getattr(snapshot, section) if fact.key in fact_keys
+        }
+        for section, fact_keys in selected.items()
+    }
+    return f"{issues}; facts: {facts}"
+
+
 def _live_settings() -> tuple[Path, str, Effort]:
     if os.environ.get("ORCHESTRATOR_CODEX_LIVE") != "1":
         pytest.skip("set ORCHESTRATOR_CODEX_LIVE=1 to opt in to Codex live checks")
@@ -233,11 +262,15 @@ def live_backend(tmp_path, app_config, monkeypatch):
 async def _prepare_live_attempt(backend, context, ledger, spec, stamp, persist):
     preflight = await backend.preflight(spec, context)
     if not preflight.accepted:
+        details = _preflight_diagnostics(preflight)
         if preflight.prepared_handle is not None:
             receipt = await backend.close(preflight.prepared_handle)
             if not receipt.settled:
-                pytest.fail(f"Codex rejected preflight and cleanup is unknown: {receipt.detail}")
-        details = "; ".join(issue.message for issue in preflight.issues)
+                pytest.fail(
+                    "Codex rejected preflight "
+                    f"(issues: {details}); cleanup is unknown "
+                    f"(receipt: {receipt.detail})"
+                )
         pytest.skip(f"host policy or Codex auth preflight is blocked: {details}")
     record_id, record_hash = persist(ledger, spec, preflight, context, stamp)
     handle = await backend.start(

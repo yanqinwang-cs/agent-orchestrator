@@ -385,7 +385,18 @@ class CodexBackend:
             server_info = getattr(initialized, "serverInfo", None)
             server_name = getattr(server_info, "name", None)
             server_version = getattr(server_info, "version", None)
-            if server_name not in {"codex", "codex-app-server"}:
+            identity_source = "serverInfo"
+            if not server_name or not server_version:
+                user_agent_name, user_agent_version = self._split_server_user_agent(
+                    getattr(initialized, "userAgent", None)
+                )
+                server_name = server_name or user_agent_name
+                server_version = server_version or user_agent_version
+                identity_source = "userAgent"
+            accepted_server_names = {"codex", "codex-app-server"}
+            if identity_source == "userAgent":
+                accepted_server_names.add("codex_python_sdk")
+            if server_name not in accepted_server_names:
                 issues.append(
                     PreflightIssue(
                         code="server_identity_unverified",
@@ -404,6 +415,7 @@ class CodexBackend:
             sdk_facts = {
                 "initialize_server_name": server_name,
                 "initialize_server_version": server_version,
+                "initialize_identity_source": identity_source,
                 "sdk_version": sdk_version,
                 "cli_version": cli_version,
                 "cli_package_version": cli_package_version,
@@ -1383,11 +1395,9 @@ class CodexBackend:
             )
         settled = await self._settle_owner(prepared)
         if not settled:
-            return ShutdownReceipt(
+            return prepared.shutdown_receipt or ShutdownReceipt(
                 settled=False,
-                detail=(
-                    "Codex app-server or SDK bridge settlement could not be independently verified"
-                ),
+                detail="Codex process and bridge settlement could not be verified",
             )
         return prepared.shutdown_receipt or ShutdownReceipt(
             settled=False, detail="Codex shutdown receipt is unavailable"
@@ -1461,7 +1471,7 @@ class CodexBackend:
             if prepared.shutdown_receipt is not None:
                 if prepared.shutdown_receipt.settled:
                     return True
-                prepared.shutdown_receipt = None
+            prepared.shutdown_receipt = None
             prepared.closed = True
             if prepared.notification_pump is not None and not prepared.notification_pump.done():
                 prepared.notification_pump.cancel()
@@ -1475,6 +1485,7 @@ class CodexBackend:
             except BaseException:
                 pass
             client_closed = prepared.client is None
+            client_close_error: str | None = None
             if prepared.client is not None:
                 try:
                     if prepared.client_close_task is None:
@@ -1485,17 +1496,35 @@ class CodexBackend:
                         timeout=max(1.0, float(self.settings.shutdown_grace_seconds)),
                     )
                     client_closed = True
-                except BaseException:
+                except BaseException as error:
                     client_closed = False
+                    client_close_error = type(error).__name__
             try:
                 receipt = await asyncio.to_thread(
                     prepared.owner.settled,
                     max(0.1, float(self.settings.shutdown_grace_seconds)),
                 )
                 if receipt is None:
+                    try:
+                        owner_status = await asyncio.to_thread(prepared.owner.status)
+                        status_facts: dict[str, Any] | str = {
+                            key: owner_status.get(key)
+                            for key in (
+                                "child_reaped",
+                                "process_group_empty",
+                                "bridge_disconnected",
+                                "bridge_connected",
+                                "settled",
+                            )
+                        }
+                    except BaseException as error:
+                        status_facts = f"unavailable:{type(error).__name__}"
                     prepared.shutdown_receipt = ShutdownReceipt(
                         settled=False,
-                        detail="owner did not verify both child reaping and SDK bridge disconnect",
+                        detail=(
+                            "owner did not verify child reaping, process-group emptiness, and "
+                            f"SDK bridge disconnect (status: {status_facts})"
+                        ),
                     )
                     return False
                 stopped = await asyncio.to_thread(prepared.owner.stop)
@@ -1505,14 +1534,24 @@ class CodexBackend:
                     owner_stopped
                     and supervisor_reaped
                     and client_closed
-                    and receipt.get("bridge_disconnected") is True
+                    and (
+                        receipt.get("bridge_disconnected") is True
+                        or receipt.get("bridge_connected") is False
+                    )
                 )
                 prepared.shutdown_receipt = ShutdownReceipt(
                     settled=settled,
                     detail=(
                         "independent Codex child and SDK bridge were waited and reaped"
                         if settled
-                        else "owner receipt or SDK bridge settlement is incomplete"
+                        else (
+                            "owner settlement proof is incomplete "
+                            f"(owner_stopped={owner_stopped}, "
+                            f"supervisor_reaped={supervisor_reaped}, "
+                            f"client_closed={client_closed}, "
+                            f"bridge_disconnected={receipt.get('bridge_disconnected')}, "
+                            f"sdk_close_error={client_close_error})"
+                        )
                     ),
                 )
                 return settled
@@ -2007,10 +2046,17 @@ class CodexBackend:
                 continue
             unknown = set(value) - _SAFE_CONFIG_KEYS
             if unknown:
+                active_unknown = sorted(
+                    key for key in unknown if value[key] not in (None, False, "", [], {}, 0)
+                )
                 issues.append(
                     PreflightIssue(
                         code="config_layer_has_unreviewed_keys",
-                        message=f"Codex {label} configuration contains unreviewed capability keys",
+                        message=(
+                            f"Codex {label} configuration contains unreviewed capability keys: "
+                            f"{', '.join(sorted(unknown))}; active: "
+                            f"{', '.join(active_unknown) or 'none'}"
+                        ),
                         setting="config/read",
                     )
                 )
@@ -2036,11 +2082,31 @@ class CodexBackend:
             features = value.get("features")
             if features:
                 if not isinstance(features, dict) or set(features) - {"multi_agent", "multiAgent"}:
+                    unknown_features = (
+                        sorted(set(features) - {"multi_agent", "multiAgent"})
+                        if isinstance(features, dict)
+                        else []
+                    )
+                    active_features = (
+                        [
+                            key
+                            for key in unknown_features
+                            if features[key] not in (None, False, "", [], {}, 0)
+                        ]
+                        if isinstance(features, dict)
+                        else []
+                    )
                     issues.append(
                         PreflightIssue(
                             code="unreviewed_runtime_features",
                             message=(
                                 f"Codex {label} configuration contains unreviewed runtime features"
+                                + (f": {', '.join(unknown_features)}" if unknown_features else "")
+                                + (
+                                    f"; enabled: {', '.join(active_features)}"
+                                    if active_features
+                                    else "; enabled: none"
+                                )
                             ),
                             setting="features",
                         )
@@ -2204,6 +2270,20 @@ class CodexBackend:
     @staticmethod
     def _config_value(config: dict[str, Any], *keys: str) -> Any:
         return next((config[key] for key in keys if key in config), None)
+
+    @staticmethod
+    def _split_server_user_agent(value: Any) -> tuple[str | None, str | None]:
+        """Read the public InitializeResponse.userAgent fallback used by the pinned SDK."""
+        if not isinstance(value, str):
+            return None, None
+        raw = value.strip()
+        if not raw:
+            return None, None
+        if "/" in raw:
+            name, version = raw.split("/", 1)
+            return name or None, version.split(maxsplit=1)[0] if version.strip() else None
+        parts = raw.split(maxsplit=1)
+        return (parts[0], parts[1]) if len(parts) == 2 else (raw, None)
 
     @staticmethod
     def _matches_identity(prepared: _PreparedCodex, identity: WorkerIdentity) -> bool:

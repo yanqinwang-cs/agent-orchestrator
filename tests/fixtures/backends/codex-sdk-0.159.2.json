@@ -13,7 +13,25 @@
     "platform": "macOS-arm64",
     "sha256": "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
   },
+  "initialize_user_agent_fallback": {
+    "serverInfo": null,
+    "userAgent": "codex_python_sdk/0.159.2 (platform details) unknown (codex_python_sdk; 0.159.2)",
+    "expected_server_name": "codex_python_sdk",
+    "expected_server_version": "0.159.2"
+  },
+  "owner_status_bridge_fields": {
+    "live_status": {"bridge_connected": false},
+    "durable_receipt": {"bridge_disconnected": true}
+  },
   "offline_lifecycle": [
+    {
+      "case": "initialize_user_agent_fallback",
+      "expected": "when serverInfo is absent, derive the pinned runtime version from public userAgent"
+    },
+    {
+      "case": "owner_live_status_bridge_field",
+      "expected": "bridge_connected_false is equivalent to bridge_disconnected_true only in exact settled owner status"
+    },
     {
       "case": "preparation_owner_intent",
       "expected": "owner_identity_is_journaled_with_attempt_reservation_and_dispatch_before_process_creation"

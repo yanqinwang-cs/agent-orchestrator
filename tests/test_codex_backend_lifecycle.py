@@ -67,7 +67,7 @@ class OfflineOwner:
             "generation": self.generation,
             "child_reaped": self.child_reaped,
             "process_group_empty": self.process_group_empty,
-            "bridge_disconnected": self.bridge_disconnected,
+            "bridge_connected": not self.bridge_disconnected,
             "settled": settled,
         }
 
@@ -83,7 +83,7 @@ class OfflineOwner:
 
     def stop(self) -> dict[str, object]:
         self.stopped = True
-        return self.status()
+        return {**self.status(), "bridge_disconnected": self.bridge_disconnected}
 
     def wait(self, timeout_seconds: float) -> bool:
         del timeout_seconds
@@ -99,6 +99,7 @@ class OfflineCodexSDK:
         self.turn_count = 0
         self.thread_id = "thread-offline-1"
         self.turn_id = "turn-offline-1"
+        self.initialize_response: object | None = None
         self.config = {
             "model": "gpt-5.6-sol",
             "approvalPolicy": "never",
@@ -121,7 +122,7 @@ class OfflineCodexSDK:
 
     async def initialize(self) -> object:
         self.calls.append(("initialize", None))
-        return SimpleNamespace(
+        return self.initialize_response or SimpleNamespace(
             serverInfo=SimpleNamespace(name="codex-app-server", version="0.159.2")
         )
 
@@ -406,6 +407,34 @@ async def _prepare_and_start(lifecycle):
 
 
 @pytest.mark.asyncio
+async def test_initialize_identity_uses_pinned_sdk_user_agent_fallback(lifecycle, repo_root):
+    fixture = json.loads((repo_root / "tests/fixtures/backends/codex-sdk-0.159.2.json").read_text())
+    identity_fixture = fixture["initialize_user_agent_fallback"]
+    original_factory = lifecycle.backend._client_factory
+
+    def client_factory():
+        assert original_factory is not None
+        client = original_factory()
+        client.initialize_response = SimpleNamespace(
+            serverInfo=identity_fixture["serverInfo"],
+            userAgent=identity_fixture["userAgent"],
+        )
+        return client
+
+    lifecycle.backend._client_factory = client_factory
+    result = await lifecycle.backend.preflight(lifecycle.spec, lifecycle.context)
+
+    assert result.accepted
+    assert result.snapshot is not None
+    runtime = {fact.key: fact.value for fact in result.snapshot.runtime}
+    assert runtime["initialize_server_name"] == identity_fixture["expected_server_name"]
+    assert runtime["initialize_server_version"] == identity_fixture["expected_server_version"]
+    assert runtime["initialize_identity_source"] == "userAgent"
+    assert result.prepared_handle is not None
+    assert (await lifecycle.backend.close(result.prepared_handle)).settled
+
+
+@pytest.mark.asyncio
 async def test_codex_turn_keeps_early_notifications_and_waits_for_owner_settlement(
     lifecycle, repo_root
 ) -> None:
@@ -568,7 +597,10 @@ async def test_provider_terminal_is_not_success_until_process_owner_settles(life
     events = [event async for event in lifecycle.backend.events(handle)]
     assert any(isinstance(event, WorkerDisconnectedEvent) for event in events)
     assert not any(isinstance(event, WorkerTerminalEvent) for event in events)
-    assert not (await lifecycle.backend.close(handle)).settled
+    receipt = await lifecycle.backend.close(handle)
+    assert not receipt.settled
+    assert receipt.detail is not None
+    assert "process_group_empty': False" in receipt.detail
 
 
 @pytest.mark.asyncio
@@ -653,6 +685,7 @@ async def test_notification_eof_without_correlated_terminal_remains_unknown(life
         ({"webSearch": "enabled"}, "web_search_enabled"),
         ({"mcpServers": {"unreviewed": {}}}, "integration_or_delegation_configured"),
         ({"features": {"multi_agent": True}}, "nested_agent_policy_unverified"),
+        ({"features": {"unreviewed_feature": True}}, "unreviewed_runtime_features"),
         ({"unknownCapability": True}, "config_layer_has_unreviewed_keys"),
     ],
 )
@@ -678,6 +711,13 @@ async def test_preflight_rejects_unverified_configuration_before_thread_creation
     result = await lifecycle.backend.preflight(lifecycle.spec, lifecycle.context)
     assert not result.accepted
     assert issue_code in {issue.code for issue in result.issues}
+    issue = next(issue for issue in result.issues if issue.code == issue_code)
+    if issue_code == "unreviewed_runtime_features":
+        assert "unreviewed_feature" in issue.message
+        assert "enabled: unreviewed_feature" in issue.message
+    if issue_code == "config_layer_has_unreviewed_keys":
+        assert "unknownCapability" in issue.message
+        assert "active: unknownCapability" in issue.message
     assert not any(call[0] == "thread_start" for call in lifecycle.clients[-1].calls)
     assert result.prepared_handle is not None
     assert (await lifecycle.backend.close(result.prepared_handle)).settled
