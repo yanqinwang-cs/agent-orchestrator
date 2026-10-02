@@ -2483,6 +2483,17 @@ class ExecutionCoordinator:
             )
             return
 
+        self._finish_control_delivery(
+            action,
+            ControlDeliveryStatus.ACKNOWLEDGED,
+            raw_ack.reason
+            or (
+                "worker acknowledged the exact persisted interrupt target; "
+                f"owner settlement pending (thread={handle.thread_id}, turn={handle.turn_id})"
+            ),
+            outbox_status=None,
+        )
+
         try:
             close_ok, raw_receipt = await self._bounded_call(self.backend.close(handle))
         except asyncio.CancelledError:

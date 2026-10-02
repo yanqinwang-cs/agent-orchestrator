@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import hashlib
 import importlib.metadata
 import importlib.resources
@@ -10,12 +11,14 @@ import json
 import os
 import re
 import subprocess
+import sys
+import time
 import tomllib
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from orchestrator.artifacts import ArtifactStore
@@ -70,16 +73,61 @@ _FACT_ENVIRONMENT_POLICY = "codex-app-server-allowlist-v1"
 _MAX_DELTA_BYTES = MAX_CODEX_REPORT_BYTES + 1
 _MAX_DIAGNOSTIC_CHARS = 160
 _UNSET = object()
+_AUTHORITY_PROJECTION_REVISION = "codex-m6-authority-v1"
+_AUTHORITY_POLICY_PROFILE = "codex-read-only-public-sdk-0.159.2-v1"
+_CONFIG_FIXTURE_EVIDENCE = "codex-0.159.2:codex-config-read-0.159.2.json"
+_FEATURE_FIXTURE_EVIDENCE = "codex-0.159.2:codex-features-list-0.159.2.txt"
+_CONFIG_FIXTURE_SHA256 = "f0694d029c3b3b3b972fd105c172123bb9e7fc697bf86bc5c2678688f2640aa1"
+_FEATURE_FIXTURE_SHA256 = "ec20628ad4e7169bb86dfcf3fc8416465adb47e3ff2255edf087f7023f3f07e7"
+_FEATURE_INVENTORY_SHA256 = _FEATURE_FIXTURE_SHA256
+_HIDE_REASONING_CONSUMER_EVIDENCE = (
+    "codex@ff6aec96948b70d94983af2641a6b67c94faeff5:"
+    "codex-rs/config/src/config_toml.rs#hide_agent_reasoning;"
+    "codex-rs/exec/src/event_processor_with_human_output.rs#reasoning-renderer"
+)
+_MANAGED_SOURCE_EVIDENCE = (
+    "codex@ff6aec96948b70d94983af2641a6b67c94faeff5:"
+    "codex-rs/config/src/loader/mod.rs#has_local_managed_configuration;"
+    "codex-rs/config/src/loader/macos.rs#has_managed_preferences"
+)
 
 
 @dataclass(frozen=True, slots=True)
 class _ReviewedRuntimeSetting:
-    """One exact, reviewed value rule for the pinned Codex surface."""
+    """Adapter-local semantics for one pinned Codex configuration value."""
 
-    classification: str
+    classification: Literal["authority_effect", "bounded_behavior", "observational_only"]
+    presence: Literal["required", "optional", "forbidden"]
     expected: Any = _UNSET
     allowed_values: tuple[Any, ...] = ()
     allowed_types: tuple[type[Any], ...] = ()
+    evidence_ref: str | None = None
+    dependencies: tuple[str, ...] = ()
+
+    @property
+    def admission_critical(self) -> bool:
+        return self.classification == "authority_effect" or bool(self.dependencies)
+
+
+def _reviewed_setting(
+    classification: Literal["authority_effect", "bounded_behavior", "observational_only"],
+    *,
+    presence: Literal["required", "optional", "forbidden"] = "optional",
+    expected: Any = _UNSET,
+    allowed_values: tuple[Any, ...] = (),
+    allowed_types: tuple[type[Any], ...] = (),
+    evidence_ref: str = _CONFIG_FIXTURE_EVIDENCE,
+    dependencies: tuple[str, ...] = (),
+) -> _ReviewedRuntimeSetting:
+    return _ReviewedRuntimeSetting(
+        classification=classification,
+        presence=presence,
+        expected=expected,
+        allowed_values=allowed_values,
+        allowed_types=allowed_types,
+        evidence_ref=evidence_ref,
+        dependencies=dependencies,
+    )
 
 
 _CONFIG_KEY_ALIASES = {
@@ -112,41 +160,74 @@ def _canonical_config_key(key: str) -> str:
 
 
 _REVIEWED_CONFIG_SETTINGS: dict[str, _ReviewedRuntimeSetting] = {
-    # These three values are the M6 permission ceiling and must be explicit.
-    "approval_policy": _ReviewedRuntimeSetting("required", expected="never"),
-    "sandbox_mode": _ReviewedRuntimeSetting("required", expected="read-only"),
-    "web_search": _ReviewedRuntimeSetting("required", expected="disabled"),
-    # The remaining entries are the exact effective defaults captured from the
-    # pinned runtime. A changed value is a policy change, not an implicit allow.
-    "allow_login_shell": _ReviewedRuntimeSetting("allowed_optional", expected=True),
-    "background_terminal_max_timeout": _ReviewedRuntimeSetting("allowed_optional", expected=300000),
-    "chatgpt_base_url": _ReviewedRuntimeSetting(
-        "allowed_optional", expected="https://chatgpt.com/backend-api/"
+    "approval_policy": _reviewed_setting(
+        "authority_effect", presence="required", expected="never", dependencies=("permission",)
     ),
-    "cli_auth_credentials_store": _ReviewedRuntimeSetting("allowed_optional", expected="file"),
-    "file_opener": _ReviewedRuntimeSetting("inert_metadata", expected="vscode"),
-    "hide_agent_reasoning": _ReviewedRuntimeSetting("inert_metadata", expected=False),
-    "history": _ReviewedRuntimeSetting(
-        "inert_metadata", expected={"max_bytes": None, "persistence": "save-all"}
+    "sandbox_mode": _reviewed_setting(
+        "authority_effect", presence="required", expected="read-only", dependencies=("filesystem",)
     ),
-    "include_apps_instructions": _ReviewedRuntimeSetting("inert_metadata", expected=True),
-    "include_collaboration_mode_instructions": _ReviewedRuntimeSetting(
-        "inert_metadata", expected=True
+    "web_search": _reviewed_setting(
+        "authority_effect", presence="required", expected="disabled", dependencies=("network",)
     ),
-    "include_environment_context": _ReviewedRuntimeSetting("inert_metadata", expected=True),
-    "include_permissions_instructions": _ReviewedRuntimeSetting("inert_metadata", expected=True),
-    "marketplaces": _ReviewedRuntimeSetting("allowed_optional", expected={}),
-    "mcp_oauth_credentials_store": _ReviewedRuntimeSetting("allowed_optional", expected="auto"),
-    "mcp_servers": _ReviewedRuntimeSetting("required", expected={}),
-    "model": _ReviewedRuntimeSetting("allowed_optional", allowed_types=(str,)),
-    "model_providers": _ReviewedRuntimeSetting("allowed_optional", expected={}),
-    "plugins": _ReviewedRuntimeSetting("required", expected={}),
-    "profiles": _ReviewedRuntimeSetting("allowed_optional", expected={}),
-    "project_doc_fallback_filenames": _ReviewedRuntimeSetting("inert_metadata", expected=[]),
-    "project_doc_max_bytes": _ReviewedRuntimeSetting("inert_metadata", expected=32768),
-    "project_root_markers": _ReviewedRuntimeSetting("inert_metadata", expected=[".git"]),
-    "shell_environment_policy": _ReviewedRuntimeSetting(
-        "allowed_optional",
+    "allow_login_shell": _reviewed_setting("authority_effect", expected=True),
+    "background_terminal_max_timeout": _reviewed_setting(
+        "bounded_behavior", expected=300000, dependencies=("budget",)
+    ),
+    "chatgpt_base_url": _reviewed_setting(
+        "authority_effect",
+        expected="https://chatgpt.com/backend-api/",
+        dependencies=("principal", "network"),
+    ),
+    "cli_auth_credentials_store": _reviewed_setting(
+        "authority_effect", expected="file", dependencies=("principal",)
+    ),
+    "file_opener": _reviewed_setting(
+        "bounded_behavior", expected="vscode", dependencies=("output",)
+    ),
+    "hide_agent_reasoning": _reviewed_setting(
+        "observational_only",
+        allowed_types=(bool,),
+        evidence_ref=_HIDE_REASONING_CONSUMER_EVIDENCE,
+    ),
+    "history": _reviewed_setting(
+        "bounded_behavior",
+        expected={"max_bytes": None, "persistence": "save-all"},
+        dependencies=("retention", "recovery"),
+    ),
+    "include_apps_instructions": _reviewed_setting(
+        "bounded_behavior", expected=True, dependencies=("identity", "provenance")
+    ),
+    "include_collaboration_mode_instructions": _reviewed_setting(
+        "bounded_behavior", expected=True, dependencies=("identity", "provenance")
+    ),
+    "include_environment_context": _reviewed_setting(
+        "bounded_behavior", expected=True, dependencies=("identity", "provenance")
+    ),
+    "include_permissions_instructions": _reviewed_setting(
+        "bounded_behavior", expected=True, dependencies=("identity", "provenance")
+    ),
+    "marketplaces": _reviewed_setting("authority_effect", expected={}),
+    "mcp_oauth_credentials_store": _reviewed_setting(
+        "authority_effect", expected="auto", dependencies=("principal",)
+    ),
+    "mcp_servers": _reviewed_setting("authority_effect", expected={}),
+    "model": _reviewed_setting(
+        "bounded_behavior", allowed_types=(str,), dependencies=("identity",)
+    ),
+    "model_providers": _reviewed_setting("authority_effect", expected={}),
+    "plugins": _reviewed_setting("authority_effect", expected={}),
+    "profiles": _reviewed_setting("authority_effect", expected={}),
+    "project_doc_fallback_filenames": _reviewed_setting(
+        "bounded_behavior", expected=[], dependencies=("provenance",)
+    ),
+    "project_doc_max_bytes": _reviewed_setting(
+        "bounded_behavior", expected=32768, dependencies=("budget", "provenance")
+    ),
+    "project_root_markers": _reviewed_setting(
+        "bounded_behavior", expected=[".git"], dependencies=("configuration_source", "provenance")
+    ),
+    "shell_environment_policy": _reviewed_setting(
+        "authority_effect",
         expected={
             "exclude": None,
             "experimental_use_profile": None,
@@ -157,41 +238,83 @@ _REVIEWED_CONFIG_SETTINGS: dict[str, _ReviewedRuntimeSetting] = {
             "set": None,
         },
     ),
-    # An empty object is the only accepted value for these capability-shaped
-    # settings. Their non-empty forms remain explicitly unsupported below.
-    "agent_control": _ReviewedRuntimeSetting("forbidden", allowed_values=(False, {})),
-    "browser_use": _ReviewedRuntimeSetting("forbidden", allowed_values=(False, {}, [])),
-    "computer_use": _ReviewedRuntimeSetting("forbidden", allowed_values=(False, {}, [])),
-    "desktop": _ReviewedRuntimeSetting("forbidden", allowed_values=(False, {}, [])),
-    "hooks": _ReviewedRuntimeSetting("forbidden", allowed_values=(False, {}, [])),
-    "tools": _ReviewedRuntimeSetting("forbidden", allowed_values=(False, {}, [])),
+    "agent_control": _reviewed_setting("authority_effect", allowed_values=(False, {})),
+    "browser_use": _reviewed_setting("authority_effect", allowed_values=(False, {}, [])),
+    "computer_use": _reviewed_setting("authority_effect", allowed_values=(False, {}, [])),
+    "desktop": _reviewed_setting("authority_effect", allowed_values=(False, {}, [])),
+    "hooks": _reviewed_setting("authority_effect", allowed_values=(False, {}, [])),
+    "tools": _reviewed_setting("authority_effect", allowed_values=(False, {}, [])),
 }
 
 
 _REVIEWED_FEATURE_SETTINGS: dict[str, _ReviewedRuntimeSetting] = {
-    # M6 has no nested agents or ambient integrations. These are explicit
-    # deny rules; a missing key is handled separately for the effective map.
-    "api_key_model_discovery": _ReviewedRuntimeSetting("allowed_optional", expected=False),
-    "auth_elicitation": _ReviewedRuntimeSetting("forbidden", expected=False),
-    "background_paginated_rollout_migration": _ReviewedRuntimeSetting(
-        "inert_metadata", expected=False
+    "api_key_model_discovery": _reviewed_setting(
+        "bounded_behavior",
+        expected=False,
+        evidence_ref=_FEATURE_FIXTURE_EVIDENCE,
+        dependencies=("identity",),
     ),
-    "codex_apps_mcp_2026_07_28": _ReviewedRuntimeSetting("forbidden", expected=False),
-    "mcp_2026_07_28": _ReviewedRuntimeSetting("forbidden", expected=False),
-    "memories": _ReviewedRuntimeSetting("forbidden", expected=False),
-    "mentions_v2": _ReviewedRuntimeSetting("forbidden", expected=False),
-    "multi_agent": _ReviewedRuntimeSetting("forbidden", expected=False),
-    "network_proxy": _ReviewedRuntimeSetting("inert_metadata", expected=None),
-    "remote_control": _ReviewedRuntimeSetting("forbidden", expected=False),
-    "remote_plugin": _ReviewedRuntimeSetting("forbidden", expected=False),
-    "tool_suggest": _ReviewedRuntimeSetting("forbidden", expected=False),
-    "windows_sandbox_service": _ReviewedRuntimeSetting("inert_metadata", expected=False),
+    "auth_elicitation": _reviewed_setting(
+        "authority_effect", expected=False, evidence_ref=_FEATURE_FIXTURE_EVIDENCE
+    ),
+    "background_paginated_rollout_migration": _reviewed_setting(
+        "bounded_behavior",
+        expected=False,
+        evidence_ref=_FEATURE_FIXTURE_EVIDENCE,
+        dependencies=("recovery",),
+    ),
+    "codex_apps_mcp_2026_07_28": _reviewed_setting(
+        "authority_effect", expected=False, evidence_ref=_FEATURE_FIXTURE_EVIDENCE
+    ),
+    "mcp_2026_07_28": _reviewed_setting(
+        "authority_effect", expected=False, evidence_ref=_FEATURE_FIXTURE_EVIDENCE
+    ),
+    "memories": _reviewed_setting(
+        "authority_effect", expected=False, evidence_ref=_FEATURE_FIXTURE_EVIDENCE
+    ),
+    "mentions_v2": _reviewed_setting(
+        "authority_effect", expected=False, evidence_ref=_FEATURE_FIXTURE_EVIDENCE
+    ),
+    "multi_agent": _reviewed_setting(
+        "authority_effect",
+        presence="required",
+        expected=False,
+        evidence_ref=_FEATURE_FIXTURE_EVIDENCE,
+    ),
+    "network_proxy": _reviewed_setting(
+        "authority_effect",
+        presence="required",
+        expected=None,
+        evidence_ref=_FEATURE_FIXTURE_EVIDENCE,
+        dependencies=("network_enforcement",),
+    ),
+    "remote_control": _reviewed_setting(
+        "authority_effect", expected=False, evidence_ref=_FEATURE_FIXTURE_EVIDENCE
+    ),
+    "remote_plugin": _reviewed_setting(
+        "authority_effect", expected=False, evidence_ref=_FEATURE_FIXTURE_EVIDENCE
+    ),
+    "tool_suggest": _reviewed_setting(
+        "authority_effect", expected=False, evidence_ref=_FEATURE_FIXTURE_EVIDENCE
+    ),
+    "windows_sandbox_service": _reviewed_setting(
+        "authority_effect",
+        presence="required",
+        expected=False,
+        evidence_ref=_FEATURE_FIXTURE_EVIDENCE,
+        dependencies=("filesystem_enforcement",),
+    ),
 }
-_SECRET_KEY = re.compile(r"(?i)(token|secret|password|api[_-]?key|credential|private[_-]?key)")
+_SECRET_KEY = re.compile(
+    r"(?i)(token|secret|password|api[_-]?key|credential|private[_-]?key|cookie|authorization)"
+)
 _INLINE_SECRET = re.compile(
-    r"(?i)(\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret)\b\s*[:=]\s*)([^\s,;]+)"
+    r"(?i)(\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret)\b\s*[:=]\s*)([^\s,;]+)"
 )
 _BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
+_URL_SECRET_QUERY = re.compile(
+    r"(?i)([?&](?:access_token|refresh_token|token|api[_-]?key|secret|password|authorization)=)[^&#\s]+"
+)
 
 
 @dataclass(slots=True)
@@ -205,6 +328,7 @@ class _PreparedCodex:
     prepared_handle: WorkerHandle
     snapshot: BackendPreflightSnapshot
     preflight_record_id: str
+    preinspected_project_folders: tuple[str, ...] = ()
     preflight_record_hash: str | None = None
     turn_id: str | None = None
     turn_status: str | None = None
@@ -214,6 +338,7 @@ class _PreparedCodex:
     turn_task: asyncio.Task[Any] | None = None
     sequence: int = 0
     deltas: bytearray = field(default_factory=bytearray)
+    pending_diagnostics: list[str] = field(default_factory=list)
     overflowed: bool = False
     closed: bool = False
     shutdown_receipt: ShutdownReceipt | None = None
@@ -221,6 +346,15 @@ class _PreparedCodex:
     start_response: Any | None = None
     client_close_task: asyncio.Task[Any] | None = None
     close_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
+@dataclass(frozen=True, slots=True)
+class _InterruptReceipt:
+    attempt_id: str
+    thread_id: str
+    turn_id: str
+    state: Literal["pending", "accepted", "rejected", "uncertain"]
+    detail: str | None = None
 
 
 class _SdkDeadlineExceeded(TimeoutError):
@@ -248,7 +382,7 @@ class CodexBackend:
         self._artifact_store = artifact_store
         self._sessions: dict[str, _PreparedCodex] = {}
         self._sessions_by_owner: dict[str, _PreparedCodex] = {}
-        self._interrupt_receipts: dict[UUID, tuple[str, str, str, str]] = {}
+        self._interrupt_receipts: dict[UUID, _InterruptReceipt] = {}
 
     async def capabilities(self) -> BackendCapabilities:
         return BackendCapabilities(
@@ -280,6 +414,23 @@ class CodexBackend:
             project_path=".",
             required_outputs=(),
         )
+        existing = self._sessions.get(spec.attempt_id)
+        if existing is not None:
+            return PreflightResult(
+                accepted=False,
+                issues=[
+                    PreflightIssue(
+                        code="preflight_replay_rejected",
+                        message=(
+                            "Codex preparation already exists for this attempt; a repeated "
+                            "preflight cannot replace its accepted evidence or grant"
+                        ),
+                        setting="attempt_id",
+                    )
+                ],
+                snapshot=existing.snapshot,
+                prepared_handle=existing.prepared_handle,
+            )
         issues = self._static_issues(spec, context)
         expected_owner_id = derive_lifecycle_owner_id(context.preparation_id)
         if context.lifecycle_owner_id not in {None, expected_owner_id}:
@@ -370,6 +521,11 @@ class CodexBackend:
         home = Path(home_value).expanduser().resolve()
         project = Path(context.project_path).expanduser().resolve()
         issues.extend(self._initial_home_config_issues(home))
+        issues.extend(self._initial_managed_and_system_config_issues(home))
+        preinspected_project_folders, project_config_issues = self._initial_project_config_issues(
+            project
+        )
+        issues.extend(project_config_issues)
         if issues:
             return PreflightResult(
                 accepted=False,
@@ -408,6 +564,7 @@ class CodexBackend:
         capability_facts: dict[str, Any] = {}
         provenance_facts: dict[str, Any] = {}
         recovery_facts: dict[str, Any] = {}
+        preparation_stage = "owner-supervision"
         try:
             owner = self._owner_factory(
                 owner_id=owner_id,
@@ -418,6 +575,7 @@ class CodexBackend:
                 environment=environment,
                 shutdown_grace_seconds=float(self.settings.shutdown_grace_seconds),
             )
+            preparation_stage = "sdk-client-construction"
             client = self._new_client(owner, project=project, home=home, cli_path=Path(cli_path))
             prepared_handle = WorkerHandle(
                 handle_id=f"codex:{spec.attempt_id}",
@@ -448,11 +606,14 @@ class CodexBackend:
                 prepared_handle=prepared_handle,
                 snapshot=placeholder,
                 preflight_record_id=context.record_id,
+                preinspected_project_folders=preinspected_project_folders,
             )
             self._sessions[spec.attempt_id] = prepared
             self._sessions_by_owner[owner_id] = prepared
 
+            preparation_stage = "app-server/start"
             await self._bounded_sdk(prepared, client.start(), 10.0)
+            preparation_stage = "initialize"
             initialized = await self._bounded_sdk(prepared, client.initialize(), 10.0)
             server_info = getattr(initialized, "serverInfo", None)
             server_name = getattr(server_info, "name", None)
@@ -497,6 +658,7 @@ class CodexBackend:
                 "protocol_profile": "openai-codex-public-v2",
             }
 
+            preparation_stage = "account/read"
             account = await self._bounded_sdk(prepared, client.account_read(), 10.0)
             account_value = getattr(account, "account", None)
             account_root = getattr(account_value, "root", None)
@@ -523,6 +685,7 @@ class CodexBackend:
                 "auth_checked": True,
             }
 
+            preparation_stage = "model/list"
             models = await self._bounded_sdk(prepared, client.model_list(), 10.0)
             model = next(
                 (
@@ -576,6 +739,7 @@ class CodexBackend:
                 "approved_binding_id": context.binding_id,
             }
 
+            preparation_stage = "config/read"
             config_read = await self._read_effective_config(client, project, prepared)
             config_dict = config_read.config.model_dump(
                 by_alias=True, exclude_none=True, mode="json"
@@ -586,7 +750,33 @@ class CodexBackend:
             ]
             config_issues = self._configuration_issues(config_dict, layer_values)
             issues.extend(config_issues)
-            config_hash = self._safe_config_hash(config_dict, layer_values)
+            source_identities, source_issues = self._config_layer_sources(
+                config_read,
+                home=home,
+                project=project,
+                preinspected_project_folders=preinspected_project_folders,
+            )
+            issues.extend(source_issues)
+            preparation_stage = "configRequirements/read"
+            requirements_response = await self._read_config_requirements(client, prepared)
+            managed_requirements = getattr(requirements_response, "requirements", None)
+            managed_requirements_dump = getattr(managed_requirements, "model_dump", None)
+            if callable(managed_requirements_dump):
+                managed_requirements = managed_requirements_dump(
+                    by_alias=True, exclude_none=True, mode="json"
+                )
+            if managed_requirements not in (None, {}):
+                issues.append(
+                    PreflightIssue(
+                        code="managed_requirements_unreviewed",
+                        message=(
+                            "Codex reports managed requirements that are not covered by the "
+                            "M6 authority policy"
+                        ),
+                        setting="configRequirements/read",
+                    )
+                )
+            config_hash = self._safe_config_hash(config_dict, layer_values, source_identities)
             if issues:
                 snapshot = self._snapshot(
                     context,
@@ -598,7 +788,13 @@ class CodexBackend:
                     {"steering": False, "read_only_report_output": CODEX_REPORT_SCHEMA},
                     {
                         "effective_config_sha256": config_hash,
+                        "managed_requirements_state": (
+                            "empty" if managed_requirements in (None, {}) else "unreviewed"
+                        ),
                         "environment_policy": _FACT_ENVIRONMENT_POLICY,
+                        "configuration_sources_sha256": self._identity_hash(
+                            self._stable_json(source_identities)
+                        ),
                     },
                     {"owner_generation": generation, "inspection_semantics": "exact-owner-only"},
                 )
@@ -611,6 +807,7 @@ class CodexBackend:
                 )
 
             # No thread is created until every effective configuration layer is inventoried.
+            preparation_stage = "thread/start"
             from openai_codex.generated.v2_all import (  # type: ignore[import-not-found]
                 AskForApproval,
                 SandboxMode,
@@ -758,6 +955,12 @@ class CodexBackend:
                 "project_path_identity_sha256": hashlib.sha256(str(project).encode()).hexdigest(),
                 "dedicated_home_identity_sha256": hashlib.sha256(str(home).encode()).hexdigest(),
                 "effective_config_sha256": config_hash,
+                "managed_requirements_state": "empty",
+                "managed_policy_state": "absent_at_prelaunch",
+                "forced_mdm_policy_state": "absent_at_prelaunch",
+                "configuration_sources_sha256": self._identity_hash(
+                    self._stable_json(source_identities)
+                ),
                 "environment_policy": _FACT_ENVIRONMENT_POLICY,
                 "environment_allowlist": "HOME,CODEX_HOME,PATH,TMPDIR,LANG",
                 "instruction_source_hashes": instruction_hash,
@@ -781,6 +984,23 @@ class CodexBackend:
                 provenance_facts,
                 recovery_facts,
             )
+            projection, observations = self._authority_projection(
+                config=config_dict,
+                layers=layer_values,
+                source_identities=source_identities,
+                spec=spec,
+                context=context,
+                owner_id=owner_id,
+                generation=generation,
+                sdk=sdk_facts,
+                binding=binding_facts,
+                auth=auth_facts,
+                permissions=permission_facts,
+                capabilities=capability_facts,
+                provenance=provenance_facts,
+                recovery=recovery_facts,
+            )
+            snapshot, _ = self._snapshot_with_projection(snapshot, projection, observations)
             prepared_handle = prepared_handle.model_copy(update={"thread_id": thread_id})
             prepared.prepared_handle = prepared_handle
             prepared.snapshot = snapshot
@@ -810,7 +1030,10 @@ class CodexBackend:
             issues.append(
                 PreflightIssue(
                     code="provider_preparation_failed",
-                    message=f"Codex preparation failed closed ({type(error).__name__})",
+                    message=(
+                        f"Codex preparation failed closed during {preparation_stage} "
+                        f"({type(error).__name__})"
+                    ),
                     setting="runtime.preparation",
                 )
             )
@@ -889,6 +1112,36 @@ class CodexBackend:
         prepared.preflight_record_hash = preflight_record_hash
         try:
             project = Path(prepared.context.project_path).expanduser().resolve()
+            home_value = os.environ.get(self.settings.codex_home_env)
+            if not home_value or not self._is_dedicated_home(home_value):
+                raise KnownPrelaunchFailure(
+                    FailureClass.CONFIGURATION,
+                    "Codex dedicated home identity is unavailable before turn submission",
+                    safe_to_retry=False,
+                )
+            home = Path(home_value).expanduser().resolve()
+            host_issues = self._initial_home_config_issues(home)
+            host_issues.extend(self._initial_managed_and_system_config_issues(home))
+            current_project_folders, project_issues = self._initial_project_config_issues(project)
+            host_issues.extend(project_issues)
+            if current_project_folders != prepared.preinspected_project_folders:
+                host_issues.append(
+                    PreflightIssue(
+                        code="project_configuration_source_set_changed",
+                        message=(
+                            "project Codex configuration folders changed after preparation; "
+                            "reprepare under the explicit attempt rules"
+                        ),
+                        setting="project.configuration_source",
+                    )
+                )
+            if host_issues:
+                details = "; ".join(issue.message for issue in host_issues)
+                raise KnownPrelaunchFailure(
+                    FailureClass.CONFIGURATION,
+                    f"Codex host configuration changed before turn submission: {details}",
+                    safe_to_retry=False,
+                )
             current_config = await self._read_effective_config(prepared.client, project, prepared)
             current_config_dict = current_config.config.model_dump(
                 by_alias=True,
@@ -899,23 +1152,146 @@ class CodexBackend:
                 getattr(layer, "config", None)
                 for layer in (getattr(current_config, "layers", None) or ())
             ]
-            expected_config_hash = next(
-                (
-                    fact.value
-                    for fact in prepared.snapshot.provenance
-                    if fact.key == "effective_config_sha256"
-                ),
-                None,
+            current_source_identities, source_issues = self._config_layer_sources(
+                current_config,
+                home=home,
+                project=project,
+                preinspected_project_folders=prepared.preinspected_project_folders,
             )
-            if (
-                self._configuration_issues(current_config_dict, current_layers)
-                or self._safe_config_hash(current_config_dict, current_layers)
-                != expected_config_hash
+            policy_issues = self._configuration_issues(current_config_dict, current_layers)
+            policy_issues.extend(source_issues)
+            requirements_response = await self._read_config_requirements(prepared.client, prepared)
+            managed_requirements = getattr(requirements_response, "requirements", None)
+            managed_requirements_dump = getattr(managed_requirements, "model_dump", None)
+            if callable(managed_requirements_dump):
+                managed_requirements = managed_requirements_dump(
+                    by_alias=True, exclude_none=True, mode="json"
+                )
+            if managed_requirements not in (None, {}):
+                policy_issues.append(
+                    PreflightIssue(
+                        code="managed_requirements_unreviewed",
+                        message="Codex managed requirements changed or are unsupported",
+                        setting="configRequirements/read",
+                    )
+                )
+            if policy_issues:
+                details = "; ".join(issue.message for issue in policy_issues)
+                raise KnownPrelaunchFailure(
+                    FailureClass.CONFIGURATION,
+                    f"Codex effective policy failed before turn submission: {details}",
+                    safe_to_retry=False,
+                )
+
+            fact_values = {fact.key: fact.value for fact in prepared.snapshot.provenance}
+            accepted_forensic_hash = fact_values.get("effective_config_sha256")
+            accepted_projection_json = fact_values.get("authority_projection_json")
+            accepted_projection_hash = fact_values.get("authority_projection_sha256")
+            accepted_observations_json = fact_values.get("reviewed_noncritical_observations_json")
+            if not all(
+                isinstance(value, str)
+                for value in (
+                    accepted_forensic_hash,
+                    accepted_projection_json,
+                    accepted_projection_hash,
+                    accepted_observations_json,
+                )
             ):
                 raise KnownPrelaunchFailure(
                     FailureClass.CONFIGURATION,
-                    "Codex effective configuration changed after accepted preparation",
+                    "Codex corrected authority evidence is missing from the accepted preflight",
                     safe_to_retry=False,
+                )
+            assert isinstance(accepted_projection_json, str)
+            assert isinstance(accepted_observations_json, str)
+            assert isinstance(accepted_projection_hash, str)
+            assert isinstance(accepted_forensic_hash, str)
+            try:
+                accepted_projection = json.loads(accepted_projection_json)
+                accepted_observations = json.loads(accepted_observations_json)
+            except json.JSONDecodeError as error:
+                raise KnownPrelaunchFailure(
+                    FailureClass.CONFIGURATION,
+                    "Codex accepted authority evidence is not valid stable JSON",
+                    safe_to_retry=False,
+                ) from error
+            if (
+                not isinstance(accepted_projection, dict)
+                or accepted_projection.get("revision") != _AUTHORITY_PROJECTION_REVISION
+                or accepted_projection.get("policy_profile") != _AUTHORITY_POLICY_PROFILE
+                or self._identity_hash(self._stable_json(accepted_projection))
+                != accepted_projection_hash
+                or not isinstance(accepted_observations, list)
+            ):
+                raise KnownPrelaunchFailure(
+                    FailureClass.CONFIGURATION,
+                    "Codex accepted authority evidence has an unsupported revision or digest",
+                    safe_to_retry=False,
+                )
+
+            current_critical, current_observations = self._configuration_projection(
+                current_config_dict, current_layers
+            )
+            observed_projection = json.loads(self._stable_json(accepted_projection))
+            observed_projection["critical_configuration"] = current_critical
+            observed_projection["configuration_sources"] = current_source_identities
+            observed_projection.setdefault("provenance_facts", {})[
+                "configuration_sources_sha256"
+            ] = self._identity_hash(self._stable_json(current_source_identities))
+            observed_projection_hash = self._identity_hash(self._stable_json(observed_projection))
+            if observed_projection_hash != accepted_projection_hash:
+                raise KnownPrelaunchFailure(
+                    FailureClass.CONFIGURATION,
+                    "Codex admission-critical authority projection changed "
+                    "after accepted preparation",
+                    safe_to_retry=False,
+                )
+
+            current_forensic_hash = self._safe_config_hash(
+                current_config_dict, current_layers, current_source_identities
+            )
+            if current_forensic_hash != accepted_forensic_hash:
+                accepted_by_identity = {
+                    (item.get("source"), item.get("path")): item
+                    for item in accepted_observations
+                    if isinstance(item, dict)
+                }
+                current_by_identity = {
+                    (item.get("source"), item.get("path")): item
+                    for item in current_observations
+                    if isinstance(item, dict)
+                }
+                changed_observations = [
+                    current_by_identity.get(identity, accepted_by_identity.get(identity))
+                    for identity in sorted(set(accepted_by_identity) | set(current_by_identity))
+                    if accepted_by_identity.get(identity) != current_by_identity.get(identity)
+                ]
+                reviewed_observations: list[dict[str, Any]] = [
+                    item for item in changed_observations if isinstance(item, dict)
+                ]
+                if not reviewed_observations or any(
+                    item.get("classification") != "observational_only"
+                    or item.get("dependencies")
+                    or not item.get("evidence_ref")
+                    for item in reviewed_observations
+                ):
+                    raise KnownPrelaunchFailure(
+                        FailureClass.CONFIGURATION,
+                        "Codex forensic configuration drift has no matching "
+                        "reviewed observational evidence",
+                        safe_to_retry=False,
+                    )
+                setting_refs = ", ".join(
+                    f"{item.get('source')}.{item.get('path')} [{item.get('evidence_ref')}]"
+                    for item in reviewed_observations
+                )
+                prepared.pending_diagnostics.append(
+                    "Codex reviewed observational configuration drift accepted; "
+                    f"record_id={preflight_record_id}; settings={setting_refs}; "
+                    f"accepted_forensic_sha256={accepted_forensic_hash}; "
+                    f"observed_forensic_sha256={current_forensic_hash}; "
+                    f"accepted_authority_projection_sha256={accepted_projection_hash}; "
+                    f"observed_authority_projection_sha256={observed_projection_hash}"
                 )
             params = self._turn_start_params(prepared)
             assert prepared.client is not None
@@ -986,6 +1362,16 @@ class CodexBackend:
             handle_id=handle.handle_id,
             occurred_at=datetime.now(UTC),
         )
+        for message in prepared.pending_diagnostics:
+            prepared.sequence += 1
+            yield WorkerProgressEvent(
+                attempt_id=handle.attempt_id,
+                sequence=prepared.sequence,
+                kind=WorkerEventKind.PROGRESS,
+                message=message[: _MAX_DIAGNOSTIC_CHARS * 5],
+                occurred_at=datetime.now(UTC),
+            )
+        prepared.pending_diagnostics.clear()
         if prepared.turn_status in {"completed", "failed", "interrupted"}:
             await prepared.event_queue.put(("terminal", self._turn_from_start_response(prepared)))
         if prepared.notification_pump is None and prepared.turn_status == "inProgress":
@@ -1082,7 +1468,8 @@ class CodexBackend:
                     sequence=prepared.sequence,
                     kind=WorkerEventKind.DISCONNECTED,
                     reason=(
-                        "Codex turn was interrupted without an accepted exact-turn control receipt"
+                        "Codex provider terminal status interrupted was observed, but no accepted "
+                        "exact-turn control receipt exists; cancellation remains unconfirmed"
                     ),
                     occurred_at=datetime.now(UTC),
                 )
@@ -1121,19 +1508,27 @@ class CodexBackend:
     async def interrupt(self, handle: WorkerHandle, command_id: UUID) -> ControlAck:
         previous = self._interrupt_receipts.get(command_id)
         if previous is not None:
-            if previous[:3] != (handle.attempt_id, handle.thread_id, handle.turn_id):
+            if (previous.attempt_id, previous.thread_id, previous.turn_id) != (
+                handle.attempt_id,
+                handle.thread_id,
+                handle.turn_id,
+            ):
                 return ControlAck(
                     command_id=command_id,
                     accepted=False,
                     reason="interrupt command ID was already bound to a different Codex turn",
                 )
-            if previous[3] == "accepted":
-                return ControlAck(command_id=command_id, accepted=True)
-            if previous[3] == "rejected":
+            if previous.state == "accepted":
+                return ControlAck(command_id=command_id, accepted=True, reason=previous.detail)
+            if previous.state == "rejected":
                 return ControlAck(
                     command_id=command_id,
                     accepted=False,
-                    reason="Codex rejected the prior exact-turn interruption",
+                    reason=previous.detail or "Codex rejected the prior exact-turn interruption",
+                )
+            if previous.state == "pending":
+                raise RuntimeError(
+                    "Codex interrupt command is already pending for its exact target"
                 )
             raise RuntimeError("Codex interrupt command already has an uncertain delivery outcome")
         prepared = self._sessions.get(handle.attempt_id)
@@ -1150,20 +1545,27 @@ class CodexBackend:
                 accepted=False,
                 reason="exact persisted Codex owner, thread and turn identity are required",
             )
-        self._interrupt_receipts[command_id] = (
-            handle.attempt_id,
-            handle.thread_id,
-            handle.turn_id,
-            "pending",
+        self._interrupt_receipts[command_id] = _InterruptReceipt(
+            handle.attempt_id, handle.thread_id, handle.turn_id, "pending"
         )
         assert prepared.client is not None
+        started_at = time.monotonic()
         try:
-            response = await self._bounded_sdk(
+            await self._bounded_sdk(
                 prepared,
                 prepared.client.turn_interrupt(handle.thread_id, handle.turn_id),
                 float(self.settings.interrupt_grace_seconds),
             )
         except asyncio.CancelledError:
+            detail = self._interrupt_acknowledgement_detail(
+                handle,
+                prepared,
+                stage="turn_interrupt_response_unknown",
+                elapsed_ms=self._elapsed_milliseconds(started_at),
+            )
+            self._interrupt_receipts[command_id] = _InterruptReceipt(
+                handle.attempt_id, handle.thread_id, handle.turn_id, "uncertain", detail
+            )
             raise
         except Exception as error:
             from openai_codex.errors import (  # type: ignore[import-not-found]
@@ -1171,40 +1573,146 @@ class CodexBackend:
             )
 
             if isinstance(error, InvalidRequestError):
-                self._interrupt_receipts[command_id] = (
-                    handle.attempt_id,
-                    handle.thread_id,
-                    handle.turn_id,
-                    "rejected",
+                detail = self._interrupt_rejection_detail(
+                    error,
+                    handle,
+                    prepared,
+                    elapsed_ms=self._elapsed_milliseconds(started_at),
+                )
+                self._interrupt_receipts[command_id] = _InterruptReceipt(
+                    handle.attempt_id, handle.thread_id, handle.turn_id, "rejected", detail
                 )
                 return ControlAck(
                     command_id=command_id,
                     accepted=False,
-                    reason="Codex rejected interruption of the exact thread and turn",
+                    reason=detail,
                 )
-            self._interrupt_receipts[command_id] = (
-                handle.attempt_id,
-                handle.thread_id,
-                handle.turn_id,
-                "uncertain",
+            detail = self._interrupt_acknowledgement_detail(
+                handle,
+                prepared,
+                stage=f"turn_interrupt_response_unknown:{type(error).__name__}",
+                elapsed_ms=self._elapsed_milliseconds(started_at),
+            )
+            self._interrupt_receipts[command_id] = _InterruptReceipt(
+                handle.attempt_id, handle.thread_id, handle.turn_id, "uncertain", detail
             )
             raise
-        acknowledged_turn = getattr(response, "turn_id", None)
-        if acknowledged_turn != handle.turn_id:
-            self._interrupt_receipts[command_id] = (
-                handle.attempt_id,
-                handle.thread_id,
-                handle.turn_id,
-                "uncertain",
-            )
-            raise RuntimeError("Codex interrupt acknowledgement did not match the exact turn")
-        self._interrupt_receipts[command_id] = (
-            handle.attempt_id,
-            handle.thread_id,
-            handle.turn_id,
-            "accepted",
+
+        # The pinned TurnInterruptResponse is empty. AsyncCodexClient has matched
+        # the correlated RPC response to this exact request; it does not echo a
+        # turn ID, and its successful return is only a control acknowledgement.
+        detail = self._interrupt_acknowledgement_detail(
+            handle,
+            prepared,
+            stage="turn_interrupt_acknowledged",
+            elapsed_ms=self._elapsed_milliseconds(started_at),
         )
-        return ControlAck(command_id=command_id, accepted=True)
+        self._interrupt_receipts[command_id] = _InterruptReceipt(
+            handle.attempt_id, handle.thread_id, handle.turn_id, "accepted", detail
+        )
+        return ControlAck(command_id=command_id, accepted=True, reason=detail)
+
+    @staticmethod
+    def _elapsed_milliseconds(started_at: float) -> int:
+        return max(0, int((time.monotonic() - started_at) * 1000))
+
+    @staticmethod
+    def _interrupt_rejection_detail(
+        error: Exception,
+        handle: WorkerHandle,
+        prepared: _PreparedCodex,
+        *,
+        elapsed_ms: int,
+    ) -> str:
+        message = getattr(error, "message", None)
+        normalized = (
+            re.sub(r"[^a-z0-9]+", " ", message.casefold()) if isinstance(message, str) else ""
+        )
+        categories = (
+            (
+                "no_active_turn",
+                "no active turn",
+                ("no active turn", "turn is no longer active", "turn is not active"),
+            ),
+            (
+                "active_turn_mismatch",
+                "requested turn does not match the active turn",
+                (
+                    "turn id mismatch",
+                    "turn mismatch",
+                    "does not match the active turn",
+                    "does not match active turn",
+                    "not the active turn",
+                ),
+            ),
+            (
+                "thread_unavailable",
+                "thread is unavailable or not loaded",
+                (
+                    "thread not found",
+                    "thread is not loaded",
+                    "thread not loaded",
+                    "thread is unavailable",
+                    "unknown thread",
+                    "thread unavailable",
+                    "failed to load thread",
+                ),
+            ),
+            (
+                "submission_failure",
+                "interrupt submission failed",
+                (
+                    "failed to submit",
+                    "submission failed",
+                    "could not submit",
+                    "failed to enqueue",
+                ),
+            ),
+        )
+        category, safe_message = "provider_rejection", "provider rejected the request"
+        for candidate, candidate_message, markers in categories:
+            if any(marker in normalized for marker in markers):
+                category, safe_message = candidate, candidate_message
+                break
+        code = getattr(error, "code", None)
+        safe_code = (
+            str(code) if isinstance(code, int) and not isinstance(code, bool) else "unavailable"
+        )
+        exception_class = re.sub(r"[^A-Za-z0-9_]", "", type(error).__name__)[:48] or "Error"
+        return CodexBackend._interrupt_acknowledgement_detail(
+            handle,
+            prepared,
+            stage="turn_interrupt_rejected",
+            elapsed_ms=elapsed_ms,
+            outcome=(
+                f"rejected exception={exception_class} code={safe_code} "
+                f"category={category}: {safe_message}"
+            ),
+        )
+
+    @staticmethod
+    def _interrupt_acknowledgement_detail(
+        handle: WorkerHandle,
+        prepared: _PreparedCodex,
+        *,
+        stage: str,
+        elapsed_ms: int,
+        outcome: str = "",
+    ) -> str:
+        stage_name = re.sub(r"[^A-Za-z0-9_:.-]", "_", stage)[:64] or "turn_interrupt"
+        raw_stage_id = prepared.spec.stage_id or "unavailable"
+        stage_id = re.sub(r"[^A-Za-z0-9_.:-]", "_", raw_stage_id)[:96]
+        target = "/".join(
+            re.sub(r"[^A-Za-z0-9_.:-]", "_", value)[:128]
+            for value in (handle.attempt_id, handle.thread_id or "", handle.turn_id or "")
+        )
+        prefix = "Codex exact-turn interrupt"
+        result = f" {outcome}" if outcome else " acknowledged"
+        detail = (
+            f"{prefix}{result}; stage={stage_name}; stage_id={stage_id}; "
+            f"elapsed_ms={elapsed_ms}; target={target}"
+        )
+        return detail[:512]
 
     async def inspect(self, identity: WorkerIdentity) -> Reconciliation:
         if identity.backend != "codex" or identity.lifecycle_owner_id is None:
@@ -1271,12 +1779,17 @@ class CodexBackend:
                     detail="exact provider result and owner settlement are retained",
                 )
             if status.get("settled") is True and isinstance(terminal, WorkerFailureEvent):
+                reconciled_status = (
+                    AttemptStatus.CANCELLED
+                    if terminal.failure_class == FailureClass.CANCELLED
+                    else AttemptStatus.FAILED
+                )
                 return Reconciliation(
                     known=True,
-                    status=AttemptStatus.FAILED,
+                    status=reconciled_status,
                     failure_class=terminal.failure_class,
                     safe_to_retry=terminal.safe_to_retry,
-                    detail="exact provider failure and owner settlement are retained",
+                    detail="exact provider terminal outcome and owner settlement are retained",
                 )
             if status.get("child_reaped") is not False or prepared.closed:
                 return Reconciliation(
@@ -1662,13 +2175,13 @@ class CodexBackend:
 
     def _has_accepted_interrupt(self, prepared: _PreparedCodex) -> bool:
         return any(
-            receipt[:3]
+            (receipt.attempt_id, receipt.thread_id, receipt.turn_id)
             == (
                 prepared.spec.attempt_id,
                 prepared.prepared_handle.thread_id,
                 prepared.turn_id,
             )
-            and receipt[3] == "accepted"
+            and receipt.state == "accepted"
             for receipt in self._interrupt_receipts.values()
         )
 
@@ -1704,6 +2217,21 @@ class CodexBackend:
                 "config/read",
                 params.model_dump(by_alias=True, exclude_none=True, mode="json"),
                 response_model=ConfigReadResponse,
+            ),
+            10.0,
+        )
+
+    async def _read_config_requirements(self, client: Any, prepared: _PreparedCodex) -> Any:
+        from openai_codex.generated.v2_all import (  # type: ignore[import-not-found]
+            ConfigRequirementsReadResponse,
+        )
+
+        return await self._bounded_sdk(
+            prepared,
+            client.request(
+                "configRequirements/read",
+                None,
+                response_model=ConfigRequirementsReadResponse,
             ),
             10.0,
         )
@@ -2100,21 +2628,90 @@ class CodexBackend:
         )
 
     @staticmethod
-    def _configuration_issues(config: Any, layers: list[Any]) -> list[PreflightIssue]:
-        """Apply the reviewed, value-sensitive policy to config/read output.
+    def _configuration_issues(
+        config: Any, layers: list[Any], *, enforce_required: bool = True
+    ) -> list[PreflightIssue]:
+        """Validate setting presence, semantics, values, and evidence separately."""
 
-        The pinned SDK permits extra configuration keys, and the runtime can
-        also return default-valued fields that are absent from the dedicated
-        TOML. Every accepted field therefore needs an exact rule here. A key
-        that is merely known to the SDK is not automatically accepted.
-        """
+        def same_typed_value(actual: Any, expected: Any) -> bool:
+            if type(actual) is not type(expected):
+                return False
+            if isinstance(expected, dict):
+                return actual.keys() == expected.keys() and all(
+                    same_typed_value(actual[key], expected[key]) for key in expected
+                )
+            if isinstance(expected, list):
+                return len(actual) == len(expected) and all(
+                    same_typed_value(left, right)
+                    for left, right in zip(actual, expected, strict=True)
+                )
+            return actual == expected
 
         def valid_value(rule: _ReviewedRuntimeSetting, candidate: Any) -> bool:
             if rule.expected is not _UNSET:
-                return candidate == rule.expected
-            if rule.allowed_values and candidate not in rule.allowed_values:
+                return same_typed_value(candidate, rule.expected)
+            if rule.allowed_values and not any(
+                same_typed_value(candidate, allowed) for allowed in rule.allowed_values
+            ):
                 return False
-            return not rule.allowed_types or isinstance(candidate, rule.allowed_types)
+            return not rule.allowed_types or type(candidate) in rule.allowed_types
+
+        def add_invalid_setting(
+            label: str,
+            canonical_key: str,
+            rule: _ReviewedRuntimeSetting,
+            *,
+            feature: bool = False,
+        ) -> None:
+            if rule.presence == "forbidden":
+                code = "forbidden_config_setting_present"
+                message = f"Codex {label} configuration includes forbidden setting {canonical_key}"
+            elif canonical_key == "approval_policy":
+                code = "approval_policy_not_deny_all"
+                message = f"Codex {label} configuration has a non-deny-all approval policy"
+            elif canonical_key == "sandbox_mode":
+                code = "sandbox_config_not_read_only"
+                message = f"Codex {label} configuration is not read-only"
+            elif canonical_key == "web_search":
+                code = "web_search_enabled"
+                message = f"Codex {label} configuration enables web search"
+            elif canonical_key in {"mcp_servers", "plugins", "hooks", "agent_control"}:
+                code = "integration_or_delegation_configured"
+                message = (
+                    f"Codex {label} configuration enables an unsupported integration "
+                    "or delegation feature"
+                )
+            elif canonical_key in {"browser_use", "computer_use", "desktop", "tools"}:
+                code = "unverified_tool_configuration"
+                message = f"Codex {label} configuration includes tools outside the validated M6 set"
+            elif feature and canonical_key == "multi_agent":
+                code = "nested_agent_policy_unverified"
+                message = f"Codex {label} configuration does not explicitly disable nested agents"
+            elif feature:
+                code = "forbidden_runtime_feature_enabled"
+                message = (
+                    f"Codex {label} runtime feature {canonical_key} "
+                    "is outside the M6 permission ceiling"
+                )
+            elif rule.classification == "authority_effect":
+                code = "authority_setting_unacceptable"
+                message = (
+                    f"Codex {label} authority setting {canonical_key} "
+                    "is outside the accepted ceiling"
+                )
+            elif rule.dependencies:
+                code = "required_guarantee_mismatch"
+                message = (
+                    f"Codex {label} setting {canonical_key} conflicts with required guarantees: "
+                    f"{', '.join(rule.dependencies)}"
+                )
+            else:
+                code = "observational_setting_invalid"
+                message = (
+                    f"Codex {label} observational setting {canonical_key} "
+                    "has an invalid type or value"
+                )
+            issues.append(PreflightIssue(code=code, message=message, setting=canonical_key))
 
         issues: list[PreflightIssue] = []
         entries = [
@@ -2138,95 +2735,56 @@ class CodexBackend:
                 key for key in value if _canonical_config_key(str(key)) not in known_keys
             )
             if unknown:
-                active_unknown = sorted(
-                    key for key in unknown if value[key] not in (None, False, "", [], {}, 0)
-                )
                 issues.append(
                     PreflightIssue(
                         code="config_layer_has_unreviewed_keys",
                         message=(
-                            f"Codex {label} configuration contains unreviewed capability keys: "
-                            f"{', '.join(unknown)}; active: "
-                            f"{', '.join(active_unknown) or 'none'}"
+                            f"Codex {label} configuration contains unclassified settings: "
+                            f"{', '.join(unknown)}; presence is rejected regardless of value"
                         ),
                         setting="config/read",
                     )
                 )
 
-            canonical_values = {
-                _canonical_config_key(str(key)): item for key, item in value.items()
-            }
+            canonical_values: dict[str, Any] = {}
+            for key, item in value.items():
+                canonical_key = _canonical_config_key(str(key))
+                if canonical_key in canonical_values:
+                    issues.append(
+                        PreflightIssue(
+                            code="ambiguous_config_aliases",
+                            message=f"Codex {label} configuration repeats setting {canonical_key}",
+                            setting=canonical_key,
+                        )
+                    )
+                canonical_values[canonical_key] = item
             for canonical_key, candidate in canonical_values.items():
                 if canonical_key == "features":
                     continue
                 rule = _REVIEWED_CONFIG_SETTINGS.get(canonical_key)
-                if rule is None or valid_value(rule, candidate):
+                if rule is None:
                     continue
-                if canonical_key in {"approval_policy"}:
+                if not rule.evidence_ref:
                     issues.append(
                         PreflightIssue(
-                            code="approval_policy_not_deny_all",
+                            code="reviewed_policy_evidence_missing",
                             message=(
-                                f"Codex {label} configuration has a non-deny-all approval policy"
+                                f"Codex {label} setting {canonical_key} lacks reviewed evidence"
                             ),
                             setting=canonical_key,
                         )
                     )
-                elif canonical_key == "sandbox_mode":
-                    issues.append(
-                        PreflightIssue(
-                            code="sandbox_config_not_read_only",
-                            message=f"Codex {label} configuration is not read-only",
-                            setting=canonical_key,
-                        )
-                    )
-                elif canonical_key in {"mcp_servers", "plugins", "hooks", "agent_control"}:
-                    issues.append(
-                        PreflightIssue(
-                            code="integration_or_delegation_configured",
-                            message=(
-                                f"Codex {label} configuration enables an unsupported integration "
-                                "or delegation feature"
-                            ),
-                            setting=canonical_key,
-                        )
-                    )
-                elif canonical_key in {"browser_use", "computer_use", "desktop", "tools"}:
-                    issues.append(
-                        PreflightIssue(
-                            code="unverified_tool_configuration",
-                            message=(
-                                f"Codex {label} configuration includes tools outside the "
-                                "validated M6 set"
-                            ),
-                            setting=canonical_key,
-                        )
-                    )
-                else:
-                    issues.append(
-                        PreflightIssue(
-                            code="reviewed_config_value_unacceptable",
-                            message=(
-                                f"Codex {label} configuration value for {canonical_key} is "
-                                "outside the reviewed M6 policy"
-                            ),
-                            setting=canonical_key,
-                        )
-                    )
+                if rule.presence == "forbidden" or not valid_value(rule, candidate):
+                    add_invalid_setting(label, canonical_key, rule)
 
-            if label == "effective":
-                for required_key in ("approval_policy", "sandbox_mode", "web_search"):
-                    if required_key not in canonical_values:
-                        issue_code = {
-                            "approval_policy": "approval_policy_not_deny_all",
-                            "sandbox_mode": "sandbox_config_not_read_only",
-                            "web_search": "web_search_policy_unverified",
-                        }[required_key]
+            if label == "effective" and enforce_required:
+                for required_key, rule in _REVIEWED_CONFIG_SETTINGS.items():
+                    if rule.presence == "required" and required_key not in canonical_values:
                         issues.append(
                             PreflightIssue(
-                                code=issue_code,
+                                code="required_setting_missing",
                                 message=(
-                                    f"Codex effective configuration does not explicitly set "
+                                    f"Codex effective configuration must explicitly contain "
                                     f"{required_key}"
                                 ),
                                 setting=required_key,
@@ -2234,16 +2792,19 @@ class CodexBackend:
                         )
 
             features = canonical_values.get("features")
-            if features is None:
-                if label == "effective":
+            if features is None and "features" not in canonical_values:
+                if (
+                    label == "effective"
+                    and enforce_required
+                    and any(
+                        rule.presence == "required" for rule in _REVIEWED_FEATURE_SETTINGS.values()
+                    )
+                ):
                     issues.append(
                         PreflightIssue(
                             code="nested_agent_policy_unverified",
-                            message=(
-                                "Codex effective configuration does not explicitly disable "
-                                "nested agents"
-                            ),
-                            setting="features.multi_agent",
+                            message="Codex effective configuration has no reviewed feature object",
+                            setting="features",
                         )
                     )
                 continue
@@ -2263,70 +2824,80 @@ class CodexBackend:
                 if feature_aliases.get(str(key), str(key)) not in _REVIEWED_FEATURE_SETTINGS
             )
             if unknown_features:
-                active_features = sorted(
-                    key
-                    for key in unknown_features
-                    if features[key] not in (None, False, "", [], {}, 0)
-                )
                 issues.append(
                     PreflightIssue(
                         code="unreviewed_runtime_features",
                         message=(
-                            f"Codex {label} configuration contains unreviewed runtime features: "
-                            f"{', '.join(unknown_features)}; enabled: "
-                            f"{', '.join(active_features) or 'none'}"
+                            f"Codex {label} configuration contains unclassified runtime features: "
+                            f"{', '.join(unknown_features)}; "
+                            "presence is rejected regardless of value"
                         ),
                         setting="features",
                     )
                 )
 
+            canonical_features: dict[str, Any] = {}
             for feature_key, candidate in features.items():
                 canonical_feature = feature_aliases.get(str(feature_key), str(feature_key))
-                rule = _REVIEWED_FEATURE_SETTINGS.get(canonical_feature)
-                if rule is None or valid_value(rule, candidate):
-                    continue
-                if canonical_feature == "multi_agent":
+                if canonical_feature in canonical_features:
                     issues.append(
                         PreflightIssue(
-                            code="nested_agent_policy_unverified",
+                            code="ambiguous_feature_aliases",
                             message=(
-                                f"Codex {label} configuration does not explicitly disable nested "
-                                "agents"
+                                f"Codex {label} runtime feature {canonical_feature} is repeated"
                             ),
-                            setting="features.multi_agent",
+                            setting=f"features.{canonical_feature}",
                         )
                     )
-                else:
+                canonical_features[canonical_feature] = candidate
+
+            for canonical_feature, candidate in canonical_features.items():
+                rule = _REVIEWED_FEATURE_SETTINGS.get(canonical_feature)
+                if rule is None:
+                    continue
+                if not rule.evidence_ref:
                     issues.append(
                         PreflightIssue(
-                            code="forbidden_runtime_feature_enabled",
+                            code="reviewed_policy_evidence_missing",
                             message=(
-                                f"Codex {label} runtime feature {canonical_feature} is outside "
-                                "the M6 permission ceiling"
+                                f"Codex {label} feature {canonical_feature} lacks reviewed evidence"
+                            ),
+                            setting=f"features.{canonical_feature}",
+                        )
+                    )
+                if rule.presence == "forbidden" or not valid_value(rule, candidate):
+                    issues.append(
+                        PreflightIssue(
+                            code=(
+                                "nested_agent_policy_unverified"
+                                if canonical_feature == "multi_agent"
+                                else "forbidden_runtime_feature_enabled"
+                            ),
+                            message=(
+                                f"Codex {label} runtime feature {canonical_feature} "
+                                "is outside the reviewed M6 policy"
                             ),
                             setting=f"features.{canonical_feature}",
                         )
                     )
 
-            search = canonical_values.get("web_search")
-            if search is not None and search != "disabled" and search is not False:
-                issues.append(
-                    PreflightIssue(
-                        code="web_search_enabled",
-                        message=f"Codex {label} configuration enables web search",
-                        setting="web_search",
-                    )
-                )
-            elif label == "effective" and search is None:
-                issues.append(
-                    PreflightIssue(
-                        code="web_search_policy_unverified",
-                        message=(
-                            "Codex effective configuration does not explicitly disable web search"
-                        ),
-                        setting="web_search",
-                    )
-                )
+            if label == "effective" and enforce_required:
+                for required_feature, rule in _REVIEWED_FEATURE_SETTINGS.items():
+                    if rule.presence == "required" and required_feature not in canonical_features:
+                        issues.append(
+                            PreflightIssue(
+                                code=(
+                                    "nested_agent_policy_unverified"
+                                    if required_feature == "multi_agent"
+                                    else "required_feature_missing"
+                                ),
+                                message=(
+                                    f"Codex effective feature inventory must explicitly contain "
+                                    f"{required_feature}"
+                                ),
+                                setting=f"features.{required_feature}",
+                            )
+                        )
         return issues
 
     @classmethod
@@ -2334,21 +2905,265 @@ class CodexBackend:
         """Inspect dedicated-home TOML before the SDK starts its app-server process."""
         config_path = home / "config.toml"
         if not config_path.exists():
-            return []
+            issues: list[PreflightIssue] = []
+        elif config_path.is_symlink():
+            issues = [
+                PreflightIssue(
+                    code="dedicated_home_config_symlink_unreviewed",
+                    message="dedicated Codex config.toml must be a regular in-home file",
+                    setting="dedicated-home.config.toml",
+                )
+            ]
+        else:
+            issues = cls._config_file_issues(config_path, "dedicated-home")
+        issues.extend(cls._hooks_file_issues(home / "hooks.json", "dedicated-home"))
+        return issues
+
+    @staticmethod
+    def _system_config_path() -> Path:
+        if os.name == "nt":
+            program_data = Path(os.environ.get("ProgramData", r"C:\ProgramData"))
+            return program_data / "OpenAI" / "Codex" / "config.toml"
+        return Path("/etc/codex/config.toml")
+
+    @staticmethod
+    def _managed_policy_paths(home: Path) -> tuple[Path, ...]:
+        if os.name == "nt":
+            program_data = Path(os.environ.get("ProgramData", r"C:\ProgramData"))
+            return (
+                program_data / "OpenAI" / "Codex" / "requirements.toml",
+                home / "managed_config.toml",
+                home / "requirements.toml",
+            )
+        return (
+            Path("/etc/codex/managed_config.toml"),
+            Path("/etc/codex/requirements.toml"),
+            home / "requirements.toml",
+            home / "managed_config.toml",
+        )
+
+    @staticmethod
+    def _path_status(path: Path) -> tuple[bool, bool]:
         try:
-            config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+            path.stat()
+            return True, True
+        except FileNotFoundError:
+            return False, True
+        except OSError:
+            return False, False
+
+    @staticmethod
+    def _forced_mdm_policy_keys() -> tuple[str, ...] | None:
+        """Check only the pinned SDK's forced managed-preference keys, never their values."""
+
+        if sys.platform != "darwin":
+            return ()
+        try:
+            core_foundation = ctypes.CDLL(
+                "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
+            )
+            create_string = core_foundation.CFStringCreateWithCString
+            create_string.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32]
+            create_string.restype = ctypes.c_void_p
+            is_forced = core_foundation.CFPreferencesAppValueIsForced
+            is_forced.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+            is_forced.restype = ctypes.c_ubyte
+            release = core_foundation.CFRelease
+            release.argtypes = [ctypes.c_void_p]
+            release.restype = None
+            encoding_utf8 = 0x08000100
+            domain = create_string(None, b"com.openai.codex", encoding_utf8)
+            if not domain:
+                return None
+            keys: list[str] = []
+            try:
+                for key_name in ("config_toml_base64", "requirements_toml_base64"):
+                    key = create_string(None, key_name.encode("ascii"), encoding_utf8)
+                    if not key:
+                        return None
+                    try:
+                        if is_forced(key, domain):
+                            keys.append(key_name)
+                    finally:
+                        release(key)
+            finally:
+                release(domain)
+            return tuple(keys)
+        except (AttributeError, OSError, TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _initial_managed_and_system_config_issues(cls, home: Path) -> list[PreflightIssue]:
+        issues: list[PreflightIssue] = []
+        system_config = cls._system_config_path()
+        exists, inspectable = cls._path_status(system_config)
+        if not inspectable:
+            issues.append(
+                PreflightIssue(
+                    code="system_configuration_unverifiable",
+                    message="Codex system configuration path cannot be inspected before startup",
+                    setting="system.config.toml",
+                )
+            )
+        elif exists:
+            issues.extend(cls._config_file_issues(system_config, "system"))
+
+        for path in cls._managed_policy_paths(home):
+            exists, inspectable = cls._path_status(path)
+            if not inspectable or exists:
+                issues.append(
+                    PreflightIssue(
+                        code="managed_configuration_unreviewed",
+                        message=(
+                            "Codex managed configuration or requirements are present or cannot "
+                            "be ruled out before app-server startup"
+                        ),
+                        setting="system.managed_configuration",
+                    )
+                )
+        forced_keys = cls._forced_mdm_policy_keys()
+        if forced_keys is None:
+            issues.append(
+                PreflightIssue(
+                    code="managed_preferences_unverifiable",
+                    message=(
+                        "forced Codex managed-preference state cannot be verified before startup"
+                    ),
+                    setting="system.managed_preferences",
+                )
+            )
+        elif forced_keys:
+            issues.append(
+                PreflightIssue(
+                    code="managed_preferences_unreviewed",
+                    message=(
+                        "forced Codex managed preferences are outside the M6 authority profile: "
+                        + ", ".join(forced_keys)
+                    ),
+                    setting="system.managed_preferences",
+                )
+            )
+        return issues
+
+    @classmethod
+    def _initial_project_config_issues(
+        cls, project: Path
+    ) -> tuple[tuple[str, ...], list[PreflightIssue]]:
+        """Inspect every project .codex source and hook file before app-server launch."""
+
+        project = project.expanduser().resolve()
+        root = project
+        for candidate in (project, *project.parents):
+            marker = candidate / ".git"
+            if marker.exists():
+                root = candidate
+                break
+        folders: list[Path] = []
+        current = project
+        while True:
+            folder = current / ".codex"
+            if folder.exists():
+                resolved = folder.resolve()
+                if not resolved.is_relative_to(root):
+                    return (), [
+                        PreflightIssue(
+                            code="project_configuration_source_unverified",
+                            message=(
+                                "a project .codex source resolves outside the selected project root"
+                            ),
+                            setting="project.configuration_source",
+                        )
+                    ]
+                folders.append(resolved)
+            if current == root or current.parent == current:
+                break
+            current = current.parent
+
+        issues: list[PreflightIssue] = []
+        for folder in folders:
+            config_path = folder / "config.toml"
+            if config_path.exists():
+                issues.extend(cls._config_file_issues(config_path, "project"))
+            issues.extend(cls._hooks_file_issues(folder / "hooks.json", "project"))
+            for policy_name in ("requirements.toml", "managed_config.toml"):
+                policy_path = folder / policy_name
+                exists, inspectable = cls._path_status(policy_path)
+                if not inspectable or exists:
+                    issues.append(
+                        PreflightIssue(
+                            code="project_managed_configuration_unreviewed",
+                            message=(
+                                "project Codex folder contains or cannot rule out an unsupported "
+                                "managed policy source"
+                            ),
+                            setting="project.managed_configuration",
+                        )
+                    )
+        return tuple(folder.as_posix() for folder in folders), issues
+
+    @classmethod
+    def _config_file_issues(cls, path: Path, label: str) -> list[PreflightIssue]:
+        if path.is_symlink():
+            return [
+                PreflightIssue(
+                    code="configuration_symlink_unreviewed",
+                    message=f"Codex {label} config.toml must not redirect to an unreviewed source",
+                    setting=f"{label}.config.toml",
+                )
+            ]
+        try:
+            config = tomllib.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
             return [
                 PreflightIssue(
                     code="initial_config_unverifiable",
-                    message="the dedicated Codex home configuration cannot be parsed safely",
-                    setting="CODEX_HOME/config.toml",
+                    message=f"Codex {label} configuration cannot be parsed safely",
+                    setting=f"{label}.config.toml",
                 )
             ]
-        return cls._configuration_issues(config, [])
+        return cls._configuration_issues(config, [], enforce_required=False)
 
     @staticmethod
-    def _safe_config_hash(config: dict[str, Any], layers: list[Any]) -> str:
+    def _hooks_file_issues(path: Path, label: str) -> list[PreflightIssue]:
+        if not path.exists():
+            return []
+        if path.is_symlink():
+            return [
+                PreflightIssue(
+                    code="hooks_source_symlink_unreviewed",
+                    message=f"Codex {label} hooks.json must not redirect to another source",
+                    setting=f"{label}.hooks.json",
+                )
+            ]
+        try:
+            hooks = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return [
+                PreflightIssue(
+                    code="hooks_source_unverifiable",
+                    message=f"Codex {label} hooks file cannot be parsed safely",
+                    setting=f"{label}.hooks.json",
+                )
+            ]
+        if hooks != {}:
+            return [
+                PreflightIssue(
+                    code="executable_hooks_configured",
+                    message=(
+                        f"Codex {label} hooks.json contains executable configuration; "
+                        "M6 accepts no hooks"
+                    ),
+                    setting=f"{label}.hooks.json",
+                )
+            ]
+        return []
+
+    @staticmethod
+    def _safe_config_hash(
+        config: dict[str, Any],
+        layers: list[Any],
+        source_identities: list[dict[str, Any]] | None = None,
+    ) -> str:
         def sanitize(value: Any, key: str = "") -> Any:
             if _SECRET_KEY.search(key):
                 return "<redacted>"
@@ -2360,15 +3175,731 @@ class CodexBackend:
             if isinstance(value, list):
                 return [sanitize(item) for item in value]
             if isinstance(value, str):
-                return _BEARER.sub("Bearer <redacted>", _INLINE_SECRET.sub(r"\1<redacted>", value))
+                cleaned = _BEARER.sub("Bearer <redacted>", value)
+                cleaned = _INLINE_SECRET.sub(r"\1<redacted>", cleaned)
+                return _URL_SECRET_QUERY.sub(r"\1<redacted>", cleaned)
             if value is None or isinstance(value, (bool, int, float)):
                 return value
             return type(value).__name__
 
-        payload = {"effective": sanitize(config), "layers": sanitize(layers)}
+        payload = {
+            "effective": sanitize(config),
+            "layers": sanitize(layers),
+            "source_identities": sanitize(source_identities or []),
+        }
         return hashlib.sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
+
+    @staticmethod
+    def _stable_json(value: Any) -> str:
+        return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+    @classmethod
+    def _configuration_projection(
+        cls, config: dict[str, Any], layers: list[Any]
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Project A/B settings; return bounded observations for C-class settings."""
+
+        critical: list[dict[str, Any]] = []
+        observations: list[dict[str, Any]] = []
+        entries = [
+            ("effective", config),
+            *((f"layer_{index}", item) for index, item in enumerate(layers)),
+        ]
+        feature_aliases = {"multiAgent": "multi_agent"}
+
+        def safe_value(rule: _ReviewedRuntimeSetting, candidate: Any) -> Any:
+            if rule.expected is not _UNSET:
+                return rule.expected
+            if rule.allowed_values:
+                for allowed in rule.allowed_values:
+                    if type(candidate) is type(allowed) and candidate == allowed:
+                        return allowed
+            if rule.allowed_types and type(candidate) in rule.allowed_types:
+                if isinstance(candidate, str):
+                    cleaned = _BEARER.sub("Bearer <redacted>", candidate)
+                    cleaned = _INLINE_SECRET.sub(r"\1<redacted>", cleaned)
+                    return _URL_SECRET_QUERY.sub(r"\1<redacted>", cleaned)
+                return candidate
+            return "rejected"
+
+        def record(
+            *,
+            label: str,
+            path: str,
+            rule: _ReviewedRuntimeSetting,
+            present: bool,
+            value: Any = None,
+        ) -> None:
+            item = {
+                "path": path,
+                "classification": rule.classification,
+                "presence": rule.presence,
+                "dependencies": list(rule.dependencies),
+                "evidence_ref": rule.evidence_ref,
+                "present": present,
+                "value": safe_value(rule, value) if present else None,
+            }
+            if rule.admission_critical:
+                critical.append({"source": label, **item})
+            else:
+                observations.append({"source": label, **item})
+
+        for label, value in entries:
+            if not isinstance(value, dict):
+                continue
+            canonical: dict[str, Any] = {}
+            for raw_key, candidate in value.items():
+                key = _canonical_config_key(str(raw_key))
+                if key not in canonical:
+                    canonical[key] = candidate
+            for key, rule in _REVIEWED_CONFIG_SETTINGS.items():
+                record(
+                    label=label,
+                    path=key,
+                    rule=rule,
+                    present=key in canonical,
+                    value=canonical.get(key),
+                )
+            features = canonical.get("features")
+            canonical_features = (
+                {
+                    feature_aliases.get(str(key), str(key)): candidate
+                    for key, candidate in features.items()
+                }
+                if isinstance(features, dict)
+                else {}
+            )
+            for key, rule in _REVIEWED_FEATURE_SETTINGS.items():
+                record(
+                    label=label,
+                    path=f"features.{key}",
+                    rule=rule,
+                    present=key in canonical_features,
+                    value=canonical_features.get(key),
+                )
+
+        return (
+            {"settings": sorted(critical, key=lambda item: (item["source"], item["path"]))},
+            sorted(observations, key=lambda item: (item["source"], item["path"])),
+        )
+
+    @classmethod
+    def _authority_projection(
+        cls,
+        *,
+        config: dict[str, Any],
+        layers: list[Any],
+        source_identities: list[dict[str, Any]],
+        spec: AgentRunSpec,
+        context: PreflightContext,
+        owner_id: str,
+        generation: str,
+        sdk: dict[str, Any],
+        binding: dict[str, Any],
+        auth: dict[str, Any],
+        permissions: dict[str, Any],
+        capabilities: dict[str, Any],
+        provenance: dict[str, Any],
+        recovery: dict[str, Any],
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        critical_config, observations = cls._configuration_projection(config, layers)
+        project_identity = provenance.get("project_path_identity_sha256")
+        home_identity = provenance.get("dedicated_home_identity_sha256")
+        instruction_hashes = provenance.get("instruction_source_hashes")
+        runtime_identity = {
+            key: sdk.get(key)
+            for key in (
+                "sdk_version",
+                "cli_version",
+                "cli_package_version",
+                "cli_sha256",
+                "audited_source_revision",
+                "protocol_profile",
+            )
+        }
+        binding_identity = {
+            "approved_binding_id": context.binding_id,
+            "profile_id": spec.profile_id,
+            "profile_version": spec.profile_version,
+            "requested_model": spec.model_id,
+            "effective_model": binding.get("effective_model"),
+            "effective_provider": binding.get("effective_provider"),
+            "requested_effort": spec.effort.value,
+            "effective_effort": binding.get("effective_effort"),
+        }
+        dimensions = [
+            {
+                "dimension": "filesystem_data",
+                "state": "policy_observed",
+                "present": "Codex thread filesystem and dedicated runtime home",
+                "available": (
+                    "host reads under Codex read-only sandbox; runtime-state writes "
+                    "in dedicated home"
+                ),
+                "permitted": "read-only attempt scope; project-only reads are not promised",
+                "enforced": (
+                    "thread/start reported readOnly; host configuration and source "
+                    "paths are pre-inspected"
+                ),
+                "observed": [
+                    "thread/start.sandbox",
+                    "thread/start.cwd",
+                    "dedicated CODEX_HOME identity",
+                ],
+                "authority_widening": (
+                    "none beyond the accepted host-read-only scope is established"
+                ),
+                "executor": "pinned Codex app-server",
+                "permission_enforcer": "Codex thread read-only sandbox",
+                "lifecycle_owner": owner_id,
+                "required_guarantees": [
+                    "no writes",
+                    "project identity",
+                    "bounded runtime-state scope",
+                ],
+                "evidence": ["thread/start.sandbox", "thread/start.cwd", _CONFIG_FIXTURE_EVIDENCE],
+                "known_gaps": ["filesystem reads are not project-root-only"],
+            },
+            {
+                "dimension": "process_executable",
+                "state": "identity_verified_owner_assigned",
+                "present": "attempt-scoped Codex app-server and descendant process group",
+                "available": "Codex runtime may start local helper processes",
+                "permitted": "only through the selected Codex attempt and read-only sandbox policy",
+                "enforced": (
+                    "exact pinned executable, allowlisted child environment, process-group "
+                    "owner and bounded settlement checks"
+                ),
+                "observed": ["cli_sha256", "owner_generation", "ProcessOwner receipt"],
+                "authority_widening": "no alternate executable chain is accepted",
+                "scope": "exact pinned SDK-bundled CLI executable and attempt process group",
+                "executor": "ProcessOwner-launched Codex app-server",
+                "permission_enforcer": "allowlisted child environment and process owner",
+                "lifecycle_owner": owner_id,
+                "required_guarantees": [
+                    "executable identity",
+                    "descendant ownership",
+                    "bounded settlement",
+                ],
+                "evidence": ["cli_sha256", "owner_generation", "ProcessOwner receipt"],
+                "known_gaps": [],
+            },
+            {
+                "dimension": "network_remote_services",
+                "state": "policy_observed",
+                "present": "remote inference/auth traffic and the Codex shell-network control",
+                "available": (
+                    "approved ChatGPT inference/auth traffic; tool egress is configured off"
+                ),
+                "permitted": "approved inference/auth destination only for this profile",
+                "enforced": (
+                    "thread/start reported networkAccess=false; web_search is disabled; "
+                    "integration maps are empty"
+                ),
+                "observed": [
+                    "thread/start.sandbox.network_access",
+                    "config/read.web_search",
+                    "configRequirements/read",
+                ],
+                "authority_widening": "none observed in the reviewed M6 surface",
+                "scope": (
+                    "inference/auth traffic remains remote; shell egress, web and configured "
+                    "integrations are denied"
+                ),
+                "executor": (
+                    "Codex app-server for inference/auth; sandboxed tool executor for shell"
+                ),
+                "permission_enforcer": (
+                    "Codex thread shell network=false; web_search=disabled; "
+                    "empty configured integrations"
+                ),
+                "lifecycle_owner": owner_id,
+                "required_guarantees": [
+                    "no unapproved tool egress",
+                    "approved inference principal",
+                ],
+                "evidence": [
+                    "thread/start.sandbox.network_access",
+                    "config/read.web_search",
+                    "configRequirements/read",
+                ],
+                "known_gaps": [
+                    "model/auth service traffic is remote and intentionally permitted; "
+                    "the host does not firewall this approved SDK connection"
+                ],
+            },
+            {
+                "dimension": "external_tools_delegation",
+                "state": "configuration_checked_with_runtime_limits",
+                "present": (
+                    "pinned Codex built-ins; no configured MCP servers, plugins, hooks "
+                    "or nested agents"
+                ),
+                "available": (
+                    "the public SDK does not return a complete effective built-in tool inventory"
+                ),
+                "permitted": (
+                    "M6 read-only report attempt; no external integrations or nested delegation"
+                ),
+                "enforced": (
+                    "exact runtime pin, empty reviewed integration config, prelaunch hook "
+                    "checks and read-only sandbox"
+                ),
+                "observed": [
+                    "config/read layers",
+                    _CONFIG_FIXTURE_EVIDENCE,
+                    "thread/start.sandbox",
+                ],
+                "authority_widening": "custom tool implementations are not admitted",
+                "scope": (
+                    "pinned read-only runtime path; configured MCP/apps/plugins/hooks "
+                    "and nested agents are rejected"
+                ),
+                "executor": "pinned Codex runtime",
+                "permission_enforcer": (
+                    "empty effective integration maps, closed reviewed settings and "
+                    "read-only thread sandbox"
+                ),
+                "lifecycle_owner": owner_id,
+                "required_guarantees": [
+                    "approved implementation identity",
+                    "no delegation",
+                    "permission ceiling",
+                ],
+                "evidence": [
+                    _CONFIG_FIXTURE_EVIDENCE,
+                    _FEATURE_FIXTURE_EVIDENCE,
+                    "thread/start.sandbox",
+                ],
+                "known_gaps": [
+                    "feature inventory is discovery evidence, not a permission receipt; "
+                    "the SDK does not expose a full built-in tool inventory"
+                ],
+            },
+            {
+                "dimension": "principal_auth_material",
+                "state": "auth_method_verified_principal_opaque",
+                "present": "Codex authentication selected by the dedicated home",
+                "available": auth.get("auth_method"),
+                "permitted": (
+                    "Codex app-server may use the account selected in dedicated CODEX_HOME"
+                ),
+                "enforced": (
+                    "dedicated home and allowlisted child environment isolate orchestrator "
+                    "state; provider account identity is opaque"
+                ),
+                "observed": ["account/read.auth_method", "dedicated_home_identity_sha256"],
+                "authority_widening": (
+                    "principal identity cannot be compared beyond the dedicated auth context"
+                ),
+                "scope": (
+                    f"dedicated Codex home identity {home_identity}; "
+                    "account identifier remains opaque"
+                ),
+                "executor": "pinned Codex app-server only",
+                "permission_enforcer": "isolated CODEX_HOME and allowlisted child environment",
+                "lifecycle_owner": owner_id,
+                "required_guarantees": [
+                    "no credential persistence by orchestrator",
+                    "scoped principal use",
+                ],
+                "evidence": ["account/read.auth_method", "dedicated_home_identity_sha256"],
+                "known_gaps": [
+                    "SDK account response does not expose a non-secret account identifier"
+                ],
+            },
+            {
+                "dimension": "durable_autonomous_effects",
+                "state": "configured_effects_checked",
+                "present": (
+                    "Codex history in the dedicated home; no accepted hooks, plugins, "
+                    "integrations or nested-agent feature"
+                ),
+                "available": (
+                    "provider history persists; app-owned nested operations are not dispatched"
+                ),
+                "permitted": (
+                    "one attempt-scoped turn with runtime history retained in dedicated home"
+                ),
+                "enforced": (
+                    "history policy is projected; unsupported persistent/executable "
+                    "integrations are rejected; owner settlement is required"
+                ),
+                "observed": ["config.read.history", "owner_generation", "ProcessOwner receipt"],
+                "authority_widening": "no app-owned nested continuation is admitted",
+                "scope": (
+                    "Codex history persists in dedicated runtime state; nested effectful "
+                    "operation receipts are outside M6"
+                ),
+                "executor": "Codex app-server",
+                "permission_enforcer": "empty hooks/plugins/integrations and pinned thread policy",
+                "lifecycle_owner": owner_id,
+                "required_guarantees": [
+                    "retention identity",
+                    "no unowned continuation",
+                    "owner settlement",
+                ],
+                "evidence": ["config.read.history", "owner_generation", "ProcessOwner receipt"],
+                "known_gaps": ["nested tool-operation settlement remains outside M6 and CAND-005"],
+            },
+            {
+                "dimension": "lifecycle_control",
+                "state": "offline_contract_verified_live_interrupt_unverified",
+                "present": "one fresh thread and one turn for this immutable attempt",
+                "available": "exact-turn interrupt endpoint; steering unsupported",
+                "permitted": "only the persisted attempt/thread/turn identity",
+                "enforced": (
+                    "single submission, exact correlation, independent ProcessOwner "
+                    "settlement and unknown-outcome retention"
+                ),
+                "observed": ["prepared_thread_id", "interrupt_semantics", "owner_generation"],
+                "authority_widening": "replay and steering are not admitted",
+                "scope": (
+                    "one fresh thread and one turn; exact-turn interrupt live acceptance "
+                    "remains unverified"
+                ),
+                "executor": "Codex SDK adapter",
+                "permission_enforcer": "exact attempt/thread/turn correlation",
+                "lifecycle_owner": owner_id,
+                "required_guarantees": [
+                    "single submission",
+                    "exact-turn interrupt",
+                    "unknown outcome retention",
+                ],
+                "evidence": ["prepared_thread_id", "interrupt_semantics", "owner_generation"],
+                "known_gaps": ["steering is unsupported"],
+            },
+            {
+                "dimension": "model_output_budget_provenance",
+                "state": "preflight_bound_coordinator_deadline_hash_bound",
+                "present": (
+                    "concrete model/effort, report schema and immutable resolved run snapshot"
+                ),
+                "available": "provider usage counters may be absent or partial",
+                "permitted": ("one artifact-envelope-v1 report under the resolved profile budget"),
+                "enforced": (
+                    "thread model binding, output schema validation, byte limits and "
+                    "coordinator profile deadline"
+                ),
+                "observed": [
+                    "effective_model",
+                    "effective_effort",
+                    CODEX_REPORT_SCHEMA,
+                    "instruction_source_hashes",
+                ],
+                "authority_widening": (
+                    "model, output schema, budget and provenance are projection-bound"
+                ),
+                "scope": (
+                    "concrete model/effort, one artifact-envelope-v1 report, bounded "
+                    "output and SDK deadlines"
+                ),
+                "executor": "Codex SDK adapter and service artifact store",
+                "permission_enforcer": (
+                    "thread binding, report schema validator and configured deadlines"
+                ),
+                "lifecycle_owner": owner_id,
+                "required_guarantees": [
+                    "model identity",
+                    "output schema",
+                    "budget",
+                    "instruction and source provenance",
+                ],
+                "evidence": [
+                    "effective_model",
+                    "effective_effort",
+                    CODEX_REPORT_SCHEMA,
+                    "instruction_source_hashes",
+                ],
+                "known_gaps": ["provider usage counters may be absent or partial"],
+            },
+        ]
+        projection = {
+            "revision": _AUTHORITY_PROJECTION_REVISION,
+            "policy_profile": _AUTHORITY_POLICY_PROFILE,
+            "policy_evidence": {
+                "codex_source_revision": AUDITED_SOURCE_REVISION,
+                "config_fixture": {
+                    "ref": _CONFIG_FIXTURE_EVIDENCE,
+                    "sha256": _CONFIG_FIXTURE_SHA256,
+                },
+                "feature_inventory": {
+                    "ref": _FEATURE_FIXTURE_EVIDENCE,
+                    "sha256": _FEATURE_INVENTORY_SHA256,
+                    "role": (
+                        "drift discovery and compatibility review; not an authorization receipt"
+                    ),
+                },
+                "reviewed_observational_consumer": _HIDE_REASONING_CONSUMER_EVIDENCE,
+                "prelaunch_managed_source_policy": _MANAGED_SOURCE_EVIDENCE,
+            },
+            "attempt_identity": {
+                "attempt_id": spec.attempt_id,
+                "resolved_spec_hash": spec.run_snapshot_hash,
+                "owner_id": owner_id,
+                "owner_generation": generation,
+            },
+            "runtime_identity": runtime_identity,
+            "binding_identity": binding_identity,
+            "configuration_sources": source_identities,
+            "critical_configuration": critical_config,
+            "auth_scope": {
+                "method": auth.get("auth_method"),
+                "available": auth.get("auth_available"),
+                "principal_identity": "opaque_not_exposed_by_account_read",
+                "dedicated_home_identity_sha256": home_identity,
+                "material_retained_by_orchestrator": False,
+            },
+            "permission_facts": permissions,
+            "ownership_facts": {
+                "owner_id": owner_id,
+                "generation": generation,
+                "process_owner": "ProcessOwner",
+                "artifact_owner": "service",
+                "workspace_owner": "service",
+            },
+            "capability_facts": capabilities,
+            "provenance_facts": {
+                "dedicated_home_identity_sha256": home_identity,
+                "project_identity_sha256": project_identity,
+                "environment_policy": provenance.get("environment_policy"),
+                "configuration_sources_sha256": provenance.get("configuration_sources_sha256"),
+                "instruction_source_hashes": instruction_hashes,
+                "backend_config_sha256": provenance.get("backend_config_sha256"),
+                "managed_policy_state": provenance.get("managed_policy_state"),
+                "forced_mdm_policy_state": provenance.get("forced_mdm_policy_state"),
+            },
+            "recovery_facts": recovery,
+            "budget": {
+                "background_terminal_max_timeout_ms": 300000,
+                "coordinator_attempt_timeout_source": "immutable_resolved_run_snapshot",
+                "coordinator_attempt_timeout_snapshot_hash": spec.run_snapshot_hash,
+                "sdk_deadlines_seconds": {"read": 10, "thread_start": 15, "turn_start": 30},
+            },
+            "output_contract": CODEX_REPORT_SCHEMA,
+            "dimensions": dimensions,
+        }
+        return projection, observations
+
+    @staticmethod
+    def _snapshot_with_projection(
+        snapshot: BackendPreflightSnapshot,
+        projection: dict[str, Any],
+        observations: list[dict[str, Any]],
+    ) -> tuple[BackendPreflightSnapshot, str]:
+        serialized = CodexBackend._stable_json(projection)
+        digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+        facts = (
+            PreflightFact(
+                key="authority_projection_revision",
+                value=_AUTHORITY_PROJECTION_REVISION,
+                state="verified",
+                evidence_ref=_CONFIG_FIXTURE_EVIDENCE,
+            ),
+            PreflightFact(
+                key="authority_policy_profile",
+                value=_AUTHORITY_POLICY_PROFILE,
+                state="verified",
+                evidence_ref=_FEATURE_FIXTURE_EVIDENCE,
+            ),
+            PreflightFact(
+                key="authority_projection_sha256",
+                value=digest,
+                state="verified",
+                evidence_ref="authority_projection_json",
+            ),
+            PreflightFact(
+                key="authority_projection_json",
+                value=serialized,
+                state="verified",
+                evidence_ref=f"sha256:{digest}",
+            ),
+            PreflightFact(
+                key="reviewed_noncritical_observations_json",
+                value=CodexBackend._stable_json(observations),
+                state="verified",
+                evidence_ref=_HIDE_REASONING_CONSUMER_EVIDENCE,
+            ),
+        )
+        return (
+            snapshot.model_copy(update={"provenance": (*snapshot.provenance, *facts)}),
+            digest,
+        )
+
+    @staticmethod
+    def _identity_hash(value: str) -> str:
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _config_layer_sources(
+        cls,
+        config_read: Any,
+        *,
+        home: Path,
+        project: Path,
+        preinspected_project_folders: tuple[str, ...],
+    ) -> tuple[list[dict[str, Any]], list[PreflightIssue]]:
+        """Return sanitized source identities and reject unsupported configuration origins."""
+
+        sources: list[dict[str, Any]] = []
+        issues: list[PreflightIssue] = []
+        layers = getattr(config_read, "layers", None)
+        if not isinstance(layers, (tuple, list)):
+            return [], [
+                PreflightIssue(
+                    code="configuration_sources_unavailable",
+                    message="Codex config/read did not expose a readable ordered source-layer list",
+                    setting="config/read.layers",
+                )
+            ]
+
+        # Packaged defaults, MDM, cloud-managed, session-flag and legacy-managed layers
+        # are rejected unless this exact authority profile gains source-specific proof.
+        allowed_types = {"system", "user", "project"}
+        for index, layer in enumerate(layers):
+            name = getattr(layer, "name", None)
+            if name is None and isinstance(layer, dict):
+                name = layer.get("name")
+            name_dump = getattr(name, "model_dump", None)
+            if callable(name_dump):
+                name = name_dump(by_alias=True, exclude_none=True, mode="json")
+            if not isinstance(name, dict) or not isinstance(name.get("type"), str):
+                issues.append(
+                    PreflightIssue(
+                        code="configuration_source_unverifiable",
+                        message=f"Codex configuration layer {index} has no typed source identity",
+                        setting=f"config/read.layers[{index}]",
+                    )
+                )
+                continue
+            source_type = name["type"]
+            if source_type not in allowed_types:
+                issues.append(
+                    PreflightIssue(
+                        code="configuration_source_unreviewed",
+                        message=(
+                            f"Codex configuration source {source_type} is not covered by the "
+                            "M6 authority policy"
+                        ),
+                        setting=f"config/read.layers[{index}].name",
+                    )
+                )
+            source_file = name.get("file")
+            project_folder = name.get("dotCodexFolder")
+            if source_type == "user":
+                if (
+                    not isinstance(source_file, str)
+                    or Path(source_file).expanduser().resolve() != (home / "config.toml").resolve()
+                ):
+                    issues.append(
+                        PreflightIssue(
+                            code="user_configuration_source_mismatch",
+                            message="Codex user configuration source is outside the dedicated home",
+                            setting=f"config/read.layers[{index}].name.file",
+                        )
+                    )
+                if name.get("profile") is not None:
+                    issues.append(
+                        PreflightIssue(
+                            code="configuration_profile_unreviewed",
+                            message=(
+                                "Codex user configuration profile layers are outside the M6 policy"
+                            ),
+                            setting=f"config/read.layers[{index}].name.profile",
+                        )
+                    )
+            elif source_type == "system":
+                expected_system_path = cls._system_config_path().expanduser().resolve()
+                if (
+                    not isinstance(source_file, str)
+                    or not Path(source_file).is_absolute()
+                    or Path(source_file).expanduser().resolve() != expected_system_path
+                ):
+                    issues.append(
+                        PreflightIssue(
+                            code="system_configuration_source_unverifiable",
+                            message=(
+                                "Codex system configuration source differs from the pinned "
+                                "host path pre-inspected before startup"
+                            ),
+                            setting=f"config/read.layers[{index}].name.file",
+                        )
+                    )
+            elif source_type == "project":
+                if (
+                    not isinstance(project_folder, str)
+                    or Path(project_folder).expanduser().resolve().as_posix()
+                    not in preinspected_project_folders
+                    or not Path(project_folder).expanduser().resolve().is_relative_to(project)
+                ):
+                    issues.append(
+                        PreflightIssue(
+                            code="project_configuration_source_unverified",
+                            message=(
+                                "Codex project configuration source is outside the pre-inspected "
+                                "project scope"
+                            ),
+                            setting=f"config/read.layers[{index}].name.dotCodexFolder",
+                        )
+                    )
+            identity: dict[str, Any] = {"type": source_type}
+            for field_name in ("file", "dotCodexFolder", "id", "name", "domain", "key", "profile"):
+                raw = name.get(field_name)
+                if raw is None:
+                    continue
+                if not isinstance(raw, str):
+                    issues.append(
+                        PreflightIssue(
+                            code="configuration_source_unverifiable",
+                            message=(
+                                f"Codex configuration source {source_type} "
+                                "has an invalid identity field"
+                            ),
+                            setting=f"config/read.layers[{index}].name.{field_name}",
+                        )
+                    )
+                    continue
+                identity[f"{field_name}_sha256"] = cls._identity_hash(
+                    str(Path(raw).expanduser().resolve())
+                    if field_name in {"file", "dotCodexFolder"}
+                    else raw
+                )
+            version = getattr(layer, "version", None)
+            if isinstance(layer, dict):
+                version = layer.get("version", version)
+            if not isinstance(version, str) or not version:
+                issues.append(
+                    PreflightIssue(
+                        code="configuration_source_unverifiable",
+                        message=f"Codex configuration source {source_type} has no version identity",
+                        setting=f"config/read.layers[{index}].version",
+                    )
+                )
+            else:
+                identity["version"] = version
+            disabled_reason = getattr(layer, "disabled_reason", None)
+            if isinstance(layer, dict):
+                disabled_reason = layer.get("disabledReason", disabled_reason)
+            identity["disabled_reason_sha256"] = (
+                cls._identity_hash(str(disabled_reason)) if disabled_reason else None
+            )
+            sources.append(identity)
+        counts: dict[str, int] = {}
+        for source in sources:
+            counts[source["type"]] = counts.get(source["type"], 0) + 1
+        if counts.get("user", 0) != 1 or counts.get("system", 0) != 1:
+            issues.append(
+                PreflightIssue(
+                    code="configuration_source_set_changed",
+                    message=(
+                        "Codex configuration source set must include one user and one system layer"
+                    ),
+                    setting="config/read.layers",
+                )
+            )
+        return sources, issues
 
     @staticmethod
     def _instruction_hash(sources: Any) -> tuple[str | None, PreflightIssue | None]:

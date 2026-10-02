@@ -12,8 +12,10 @@ from orchestrator.artifacts import ArtifactStore
 from orchestrator.backends.codex import CodexBackend
 from orchestrator.domain.backend import (
     PreflightContext,
+    WorkerDisconnectedEvent,
     WorkerFailureEvent,
     WorkerIdentity,
+    WorkerProgressEvent,
     WorkerTerminalEvent,
 )
 from orchestrator.domain.models import (
@@ -310,25 +312,103 @@ async def test_codex_live_one_short_read_only_turn(live_backend) -> None:
 async def test_codex_live_exact_turn_interrupt_and_cleanup(live_backend) -> None:
     backend, context, ledger, spec, stamp, persist = live_backend
     handle = None
+    control_outcome = "not_sent"
+    observed_terminal = "unobserved"
+    control_detail = "no control response"
     try:
         async with asyncio.timeout(90):
             handle, identity = await _prepare_live_attempt(
                 backend, context, ledger, spec, stamp, persist
             )
+            event_stream = backend.events(handle)
+            while True:
+                event = await asyncio.wait_for(anext(event_stream), timeout=30)
+                if isinstance(event, WorkerProgressEvent) and (
+                    event.message in {"turn/started", "item/started"}
+                    or event.message.startswith("item/started:")
+                ):
+                    break
+                if isinstance(event, WorkerTerminalEvent):
+                    observed_terminal = event.result.provider_status or "completed"
+                    pytest.skip(
+                        "turn completed before an active-turn notification; control is inconclusive"
+                    )
+                if isinstance(event, WorkerFailureEvent):
+                    observed_terminal = (
+                        "interrupted" if event.failure_class.value == "cancelled" else "failed"
+                    )
+                    pytest.fail(
+                        "Codex turn became terminal before the exact-turn control request: "
+                        f"{observed_terminal}"
+                    )
+                if isinstance(event, WorkerDisconnectedEvent):
+                    observed_terminal = "unknown"
+                    pytest.fail(
+                        "Codex disconnected before the exact-turn control request: "
+                        f"{event.reason[:240]}"
+                    )
+
             ack = await backend.interrupt(handle, uuid4())
+            control_outcome = "accepted" if ack.accepted else "rejected"
+            control_detail = ack.reason or "no control detail"
             if not ack.accepted:
                 reconciliation = await backend.inspect(identity)
                 if reconciliation.known and reconciliation.status is AttemptStatus.SUCCEEDED:
                     pytest.skip("turn completed before the exact-turn interruption; inconclusive")
-                pytest.fail(f"exact-turn interruption was rejected: {ack.reason}")
-            events = [event async for event in backend.events(handle)]
-            if any(isinstance(event, WorkerTerminalEvent) for event in events):
-                pytest.skip("turn completed before interruption took effect; inconclusive")
+                status = reconciliation.status.value if reconciliation.status is not None else None
+                failure_class = (
+                    reconciliation.failure_class.value
+                    if reconciliation.failure_class is not None
+                    else None
+                )
+                detail = (reconciliation.detail or "no reconciliation detail")[:240]
+                observed_terminal = status or "unknown"
+                pytest.fail(
+                    "exact-turn interruption was rejected: "
+                    f"{ack.reason}; reconciliation="
+                    f"known={reconciliation.known}, status={status}, "
+                    f"failure_class={failure_class}, detail={detail}"
+                )
+            events = [event async for event in event_stream]
+            terminal = next(
+                (event for event in events if isinstance(event, WorkerTerminalEvent)), None
+            )
             failure = next(
                 (event for event in events if isinstance(event, WorkerFailureEvent)), None
             )
-            assert failure is not None and failure.failure_class == "cancelled"
+            disconnected = next(
+                (event for event in events if isinstance(event, WorkerDisconnectedEvent)), None
+            )
+            if terminal is not None:
+                observed_terminal = terminal.result.provider_status or "completed"
+            elif failure is not None:
+                observed_terminal = (
+                    "interrupted" if failure.failure_class.value == "cancelled" else "failed"
+                )
+            elif disconnected is not None:
+                observed_terminal = "unknown"
+            if terminal is not None and observed_terminal == "completed":
+                # The pinned server may finish normally after acknowledging the RPC.
+                # Keep that outcome; the acknowledgement remains a separate fact.
+                pass
+            elif failure is not None and failure.failure_class.value == "cancelled":
+                pass
+            else:
+                detail = (
+                    disconnected.reason[:240] if disconnected is not None else "no terminal event"
+                )
+                pytest.fail(
+                    "Codex acknowledged exact-turn control but did not produce a supported "
+                    f"terminal observation: {observed_terminal}; detail={detail}"
+                )
     finally:
         if handle is not None:
             receipt = await backend.close(handle)
+            print(
+                "codex_live_interrupt_evidence "
+                f"target={handle.attempt_id}/{handle.thread_id}/{handle.turn_id} "
+                f"owner_generation={handle.lifecycle_owner_id} control={control_outcome} "
+                f"control_detail={control_detail[:512]} observed_terminal={observed_terminal} "
+                f"owner_settled={receipt.settled} owner_detail={(receipt.detail or 'none')[:300]}"
+            )
             assert receipt.settled, receipt.detail

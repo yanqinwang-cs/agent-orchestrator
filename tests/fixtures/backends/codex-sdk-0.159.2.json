@@ -23,6 +23,11 @@
     "live_status": {"bridge_connected": false},
     "durable_receipt": {"bridge_disconnected": true}
   },
+  "turn_interrupt_response": {
+    "model": "TurnInterruptResponse",
+    "fields": [],
+    "json": {}
+  },
   "offline_lifecycle": [
     {
       "case": "initialize_user_agent_fallback",
@@ -59,6 +64,22 @@
     {
       "case": "exact_turn_interrupt",
       "expected": "one_exact_thread_turn_interrupt_and_idempotent_command_receipt"
+    },
+    {
+      "case": "empty_interrupt_response",
+      "expected": "correlated_empty_rpc_response_is_control_ack_only_not_terminal_outcome"
+    },
+    {
+      "case": "interrupt_completion_race",
+      "expected": "accepted_control_receipt_is_preserved_with_interrupted_or_normal_terminal_observation"
+    },
+    {
+      "case": "interrupted_terminal_reconciliation",
+      "expected": "settled_exact_interruption_reconciles_as_cancelled_not_failed"
+    },
+    {
+      "case": "interrupt_rejection_diagnostic",
+      "expected": "bounded_code_category_and_exact_target_without_raw_provider_message_or_data"
     },
     {
       "case": "foreign_owner_interrupt",

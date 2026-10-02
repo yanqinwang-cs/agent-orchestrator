@@ -1702,6 +1702,69 @@ async def test_unsupported_workflow_stop_retains_capacity_for_reconciliation(
 
 
 @pytest.mark.asyncio
+async def test_interrupt_ack_and_unsettled_close_are_persisted_as_separate_facts(
+    app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "review", "stop-ack-unsettled")
+    coordinator, backend, _clock = _coordinator(
+        ledger,
+        ownership,
+        factory=lambda spec: AttemptScript(
+            events=_worker_script(spec).events,
+            close_receipts=(ShutdownReceipt(settled=False, detail="still running"),),
+            reconciliations=(Reconciliation(known=False, detail="owner is unresolved"),),
+            event_barrier=True,
+        ),
+        auto_release=False,
+    )
+    coordinator.advance("stop-ack-unsettled")
+    coordinator.advance("stop-ack-unsettled")
+    await coordinator.dispatch_pending("stop-ack-unsettled")
+    attempt = ledger.list_attempts("stop-ack-unsettled")[0]
+    await backend.wait_until_waiting(attempt.spec.attempt_id, 0)
+
+    run = ledger.get_run("stop-ack-unsettled")
+    receipt = await coordinator.apply_intervention(
+        StopAttemptIntervention(
+            command_id=uuid4(),
+            actor="user",
+            target=attempt.spec.attempt_id,
+            expected_run_revision=run.state.revision,
+            kind=InterventionKind.STOP_ATTEMPT,
+            run_id="stop-ack-unsettled",
+            attempt_id=attempt.spec.attempt_id,
+        )
+    )
+
+    assert receipt.outcome == CommandOutcome.ACCEPTED
+    assert ledger.get_attempt(attempt.spec.attempt_id).state.status == AttemptStatus.OUTCOME_UNKNOWN
+    assert any(
+        item.status.value == "held" for item in ledger.list_reservations("stop-ack-unsettled")
+    )
+    record = ledger.list_intervention_records("stop-ack-unsettled")[-1]
+    assert record.delivery_state == ControlDeliveryStatus.UNKNOWN
+    delivery = record.deliveries[0]
+    assert delivery.worker_thread_id is not None
+    assert delivery.worker_turn_id is not None
+
+    control_events = [
+        event
+        for event in ledger.list_events("stop-ack-unsettled")
+        if event.kind.value
+        in {"intervention_delivery_acknowledged", "intervention_delivery_unknown"}
+    ]
+    assert [event.kind.value for event in control_events] == [
+        "intervention_delivery_acknowledged",
+        "intervention_delivery_unknown",
+    ]
+    assert "acknowledged" in control_events[0].detail
+    assert "close" in control_events[1].detail
+    backend.release_next(attempt.spec.attempt_id)
+    await coordinator.wait_for_workers()
+
+
+@pytest.mark.asyncio
 async def test_worker_completion_wins_race_with_pending_interrupt(app_config, ledger_owner) -> None:
     ledger, ownership = ledger_owner
     _create_run(ledger, app_config, "review", "stop-race")

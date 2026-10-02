@@ -1,0 +1,43 @@
+{
+  "fixture_kind": "synthetic_policy_expectations",
+  "provider_traffic": false,
+  "runtime": {
+    "sdk_version": "0.159.2",
+    "cli_version": "0.159.2",
+    "source_revision": "ff6aec96948b70d94983af2641a6b67c94faeff5",
+    "platform_family": "unix"
+  },
+  "policy": {
+    "projection_revision": "codex-m6-authority-v1",
+    "profile": "codex-read-only-public-sdk-0.159.2-v1",
+    "config_fixture": {
+      "ref": "codex-0.159.2:codex-config-read-0.159.2.json",
+      "sha256": "f0694d029c3b3b3b972fd105c172123bb9e7fc697bf86bc5c2678688f2640aa1"
+    },
+    "feature_inventory": {
+      "ref": "codex-0.159.2:codex-features-list-0.159.2.txt",
+      "sha256": "ec20628ad4e7169bb86dfcf3fc8416465adb47e3ff2255edf087f7023f3f07e7",
+      "role": "drift discovery and compatibility review; not an authorization receipt"
+    }
+  },
+  "reviewed_observational_setting": {
+    "name": "hide_agent_reasoning",
+    "classification": "observational_only",
+    "presence": "optional",
+    "allowed_types": ["boolean"],
+    "dependencies": [],
+    "evidence_ref": "codex@ff6aec96948b70d94983af2641a6b67c94faeff5:codex-rs/config/src/config_toml.rs#hide_agent_reasoning;codex-rs/exec/src/event_processor_with_human_output.rs#reasoning-renderer"
+  },
+  "prelaunch_policy_sources": [
+    "dedicated-home/config.toml",
+    "dedicated-home/hooks.json",
+    "project/.codex/config.toml",
+    "project/.codex/hooks.json",
+    "/etc/codex/config.toml",
+    "/etc/codex/managed_config.toml",
+    "/etc/codex/requirements.toml",
+    "com.openai.codex#config_toml_base64",
+    "com.openai.codex#requirements_toml_base64"
+  ],
+  "unknown_sources_fail_closed": true
+}
