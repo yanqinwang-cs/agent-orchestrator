@@ -8,7 +8,7 @@ The research direction includes information selection, representation, recipient
 
 ## Current implementation
 
-This checkout still contains the previous Agent Orchestrator implementation: typed workflow configuration, immutable snapshots, a SQLite ledger, filesystem artifacts, a deterministic workflow coordinator, fake execution/decision adapters, and a pinned Codex SDK adapter. It does not yet implement Agent Lab experiment definitions, datasets, benchmark evaluation, a public result surface, Deep Agents, or AgentCore hosting.
+This checkout still contains the previous Agent Orchestrator implementation: typed workflow configuration, immutable snapshots, a SQLite ledger, filesystem artifacts, a deterministic workflow coordinator, fake execution/decision adapters, and a pinned Codex SDK adapter. A separate `agent_lab` backend now provides a curated, versioned discovery catalog, a local single-user composition workspace with immutable saved revisions and non-secret model settings, and a JSON API. It does not implement the website UI, Agent Lab experiment definitions, datasets, benchmark evaluation/results, execution integration, Deep Agents, or AgentCore hosting.
 
 The preferred initial execution direction is Deep Agents, its LangChain/LangGraph primitives, and Amazon Bedrock AgentCore Runtime, behind replaceable adapters. Generic experiment records should remain independent of framework and provider types.
 
@@ -42,7 +42,9 @@ Live provider tests require explicit opt-in. See [development guidance](docs/DEV
 | `docs/REPOSITORY_AUDIT.md` | Complete tracked-file classification, cleanup evidence, and code assessment |
 | `docs/CODEBASE_MIGRATION_PLAN.md` | Proposed bounded migration and official execution-stack sources |
 | `docs/DEVELOPMENT.md` | Commands for the runnable legacy baseline |
-| `src/orchestrator/` | Existing code to assess for reuse, adaptation, or later removal |
+| `src/orchestrator/` | Existing legacy runtime, separate from the Agent Lab backend |
+| `src/agent_lab/` | Versioned catalog, SQLite composition persistence, and local JSON API |
+| `docs/DISCOVERY_COMPOSITION_BACKEND.md` | Backend contracts, API routes, local boundary, and focused test command |
 | `config/`, `presets/` | Configuration required by the current loader and regression suite |
 | `schemas/` | Generated schemas for existing models, retained without changes |
 | `tests/` | Existing offline regressions and separately gated Codex live tests |
