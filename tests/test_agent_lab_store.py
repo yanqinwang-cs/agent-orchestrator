@@ -280,6 +280,25 @@ def test_schema_v1_database_is_rejected_without_modification(tmp_path) -> None:
         assert connection.execute("SELECT value FROM preserved_data").fetchone()[0] == "keep me"
 
 
+def test_nonempty_unversioned_database_is_rejected_without_modification(tmp_path) -> None:
+    database = tmp_path / "unrelated.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE unrelated_data (value TEXT NOT NULL)")
+        connection.execute("INSERT INTO unrelated_data VALUES ('keep me')")
+
+    with pytest.raises(RuntimeError, match="nonempty unversioned"):
+        SQLiteStore(database)
+
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 0
+        assert connection.execute("SELECT value FROM unrelated_data").fetchone()[0] == "keep me"
+        agent_lab_objects = connection.execute(
+            """SELECT name FROM sqlite_master
+               WHERE name IN ('catalog_definitions', 'compositions')"""
+        ).fetchall()
+        assert agent_lab_objects == []
+
+
 def test_binding_targets_and_order_survive_reload_and_resource_reuse(tmp_path) -> None:
     database = tmp_path / "agent-lab.sqlite3"
     store = SQLiteStore(database)

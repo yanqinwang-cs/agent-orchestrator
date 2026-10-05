@@ -141,6 +141,15 @@ def test_api_creates_revises_retrieves_and_duplicates_compositions(tmp_path) -> 
     assert duplicate["revision"]["name"] == "Research alternative"
     assert duplicate["revision"]["bindings"][0]["resource_id"] == "prompt/clarify-task"
 
+    status, _, error = request(
+        api,
+        "POST",
+        f"/api/compositions/{composition_id}/duplicates",
+        body={"revision": 999},
+    )
+    assert status == 404
+    assert error["error"] == "not_found"
+
     status, _, listing = request(api, "GET", "/api/compositions")
     assert status == 200
     assert len(listing) == 2

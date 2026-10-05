@@ -252,6 +252,14 @@ class SQLiteStore:
                     f"Unsupported Agent Lab database schema {version}; expected {SCHEMA_VERSION}."
                 )
             if version == 0:
+                existing_object = connection.execute(
+                    """SELECT type, name FROM sqlite_master
+                       WHERE name NOT GLOB 'sqlite_*' LIMIT 1"""
+                ).fetchone()
+                if existing_object is not None:
+                    raise RuntimeError(
+                        "Refusing to initialize a nonempty unversioned SQLite database."
+                    )
                 connection.executescript(_SCHEMA)
                 connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             self._seed_catalog(connection)
@@ -571,7 +579,7 @@ class SQLiteStore:
                 (item for item in existing.history if item.revision == revision), None
             )
             if historical is None:
-                raise ValueError(f"Composition revision {revision} does not exist.")
+                raise CompositionNotFoundError(f"{composition_id}@{revision}")
             source = historical
         copy_name = name if name is not None else f"{source.name} (copy)"[:120]
         return self.save_composition(
