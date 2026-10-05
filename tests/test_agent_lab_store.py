@@ -253,12 +253,31 @@ def test_saved_binding_keeps_its_display_snapshot_when_definition_changes(tmp_pa
     assert loaded.revision.bindings[0].kind == ResourceKind.PROMPT
     assert store.get_resource("prompt/clarify-task").definition.name == "Renamed later"
 
+    duplicate = store.duplicate_composition(saved.id, name=saved.revision.name)
+    assert duplicate.revision.bindings == saved.revision.bindings
+    assert duplicate.revision.content_hash == saved.revision.content_hash
+
 
 def test_database_records_a_schema_version(tmp_path) -> None:
     database = tmp_path / "agent-lab.sqlite3"
     SQLiteStore(database)
     with sqlite3.connect(database) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+
+
+def test_schema_v1_database_is_rejected_without_modification(tmp_path) -> None:
+    database = tmp_path / "agent-lab-v1.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE preserved_data (value TEXT NOT NULL)")
+        connection.execute("INSERT INTO preserved_data VALUES ('keep me')")
+        connection.execute("PRAGMA user_version = 1")
+
+    with pytest.raises(RuntimeError, match="schema 1; expected 2"):
+        SQLiteStore(database)
+
+    with sqlite3.connect(database) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert connection.execute("SELECT value FROM preserved_data").fetchone()[0] == "keep me"
 
 
 def test_binding_targets_and_order_survive_reload_and_resource_reuse(tmp_path) -> None:

@@ -27,7 +27,7 @@ from agent_lab.domain import (
 )
 from agent_lab.identity import sha256_json
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_definitions (
@@ -402,8 +402,11 @@ class SQLiteStore:
         model_settings: Sequence[ModelSettings] = (),
         composition_id: str | None = None,
         expected_revision: int | None = None,
+        _binding_snapshots: Sequence[CompositionBinding] | None = None,
     ) -> SavedComposition:
         """Save one immutable revision, pinning every submitted resource version exactly."""
+        if _binding_snapshots is not None and bindings:
+            raise ValueError("Binding selections and snapshots cannot be saved together.")
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
@@ -429,31 +432,32 @@ class SQLiteStore:
                 revision_number = int(current["current_revision"]) + 1
                 created_at = current["created_at"]
 
-            resolved: list[CompositionBinding] = []
-            for target, ordinal, resource_id, version in bindings:
-                row = connection.execute(
-                    """SELECT d.id, d.kind, d.name, v.version, v.digest
-                       FROM catalog_definitions AS d
-                       JOIN catalog_versions AS v ON v.resource_id = d.id
-                       WHERE d.id = ? AND v.version = ?""",
-                    (resource_id, version),
-                ).fetchone()
-                if row is None:
-                    raise MissingBindingError(
-                        f"Catalog version {resource_id}@{version} does not exist. "
-                        "Choose an available version explicitly; no newer version was substituted."
+            resolved = list(_binding_snapshots) if _binding_snapshots is not None else []
+            if _binding_snapshots is None:
+                for target, ordinal, resource_id, version in bindings:
+                    row = connection.execute(
+                        """SELECT d.id, d.kind, d.name, v.version, v.digest
+                           FROM catalog_definitions AS d
+                           JOIN catalog_versions AS v ON v.resource_id = d.id
+                           WHERE d.id = ? AND v.version = ?""",
+                        (resource_id, version),
+                    ).fetchone()
+                    if row is None:
+                        raise MissingBindingError(
+                            f"Catalog version {resource_id}@{version} does not exist. "
+                            "Choose an available version explicitly; no newer version was substituted."
+                        )
+                    resolved.append(
+                        CompositionBinding(
+                            target=target,
+                            ordinal=ordinal,
+                            resource_id=row["id"],
+                            version=row["version"],
+                            digest=row["digest"],
+                            name=row["name"],
+                            kind=row["kind"],
+                        )
                     )
-                resolved.append(
-                    CompositionBinding(
-                        target=target,
-                        ordinal=ordinal,
-                        resource_id=row["id"],
-                        version=row["version"],
-                        digest=row["digest"],
-                        name=row["name"],
-                        kind=row["kind"],
-                    )
-                )
 
             draft = CompositionDraft(
                 name=name,
@@ -574,11 +578,9 @@ class SQLiteStore:
             name=copy_name,
             description=source.description,
             instructions=source.instructions,
-            bindings=tuple(
-                (item.target, item.ordinal, item.resource_id, item.version)
-                for item in source.bindings
-            ),
+            bindings=(),
             model_settings=source.model_settings,
+            _binding_snapshots=source.bindings,
         )
 
     def get_composition_revision(

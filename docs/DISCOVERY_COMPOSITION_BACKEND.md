@@ -13,7 +13,7 @@ uv run agent-lab-api --database ~/.agent-lab/agent-lab.sqlite3 --port 8765
 
 The server binds only to `127.0.0.1` and rejects requests whose `Host` header is not `localhost` or a loopback IP address. Composition endpoints are a local single-user workspace, not an authenticated access-control system. Do not expose this server on a network or use it as a multi-user service. It does not implement accounts, teams, invitations, or sharing.
 
-The database path can also be set with `AGENT_LAB_DATABASE`. A file-backed database is required. The database and SQLite sidecar files are forced to owner-read/write permissions, including when a custom path already exists. SQLite `PRAGMA user_version` is `1` for this schema. A version mismatch fails closed rather than interpreting an unknown schema.
+The database path can also be set with `AGENT_LAB_DATABASE`. A file-backed database is required. The database and SQLite sidecar files are forced to owner-read/write permissions, including when a custom path already exists. SQLite `PRAGMA user_version` is `2` for this schema. A version mismatch fails closed without migrating, deleting, or interpreting an unsupported database.
 
 ## Persistence contracts
 

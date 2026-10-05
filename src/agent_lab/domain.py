@@ -43,16 +43,6 @@ class ResourceKind(StrEnum):
     AGENT_CONFIG = "agent_config"
 
 
-RESOURCE_LABELS: dict[ResourceKind, str] = {
-    ResourceKind.SKILL: "Skills",
-    ResourceKind.PROMPT: "Prompts",
-    ResourceKind.PLUGIN: "Plugins",
-    ResourceKind.TOOL: "Tools",
-    ResourceKind.MCP_SERVER: "MCP servers",
-    ResourceKind.AGENT_CONFIG: "Agent configurations",
-}
-
-
 class Contract(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
