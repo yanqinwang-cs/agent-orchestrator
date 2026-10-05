@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 from collections.abc import Callable
 from http import HTTPStatus
 from typing import Any
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -28,6 +29,8 @@ class ApiContract(BaseModel):
 
 
 class BindingSelection(ApiContract):
+    target: str = Field(min_length=1, max_length=80)
+    ordinal: int = Field(ge=0)
     resource_id: ResourceId
     version: Version
 
@@ -62,6 +65,7 @@ class SQLiteApi:
         path = str(environ.get("PATH_INFO", "/"))
         query = parse_qs(str(environ.get("QUERY_STRING", "")), keep_blank_values=True)
         try:
+            _require_loopback_host(environ)
             status, payload, headers = self._dispatch(method, path, query, environ)
         except ValidationError as exc:
             status = HTTPStatus.UNPROCESSABLE_ENTITY
@@ -155,7 +159,10 @@ class SQLiteApi:
                 name=request.name,
                 description=request.description,
                 instructions=request.instructions,
-                bindings=tuple((item.resource_id, item.version) for item in request.bindings),
+                bindings=tuple(
+                    (item.target, item.ordinal, item.resource_id, item.version)
+                    for item in request.bindings
+                ),
                 model_settings=request.model_settings,
             )
             return self._composition_response(composition, HTTPStatus.CREATED)
@@ -193,7 +200,8 @@ class SQLiteApi:
                 description=revision_request.description,
                 instructions=revision_request.instructions,
                 bindings=tuple(
-                    (item.resource_id, item.version) for item in revision_request.bindings
+                    (item.target, item.ordinal, item.resource_id, item.version)
+                    for item in revision_request.bindings
                 ),
                 model_settings=revision_request.model_settings,
                 composition_id=composition_id,
@@ -280,6 +288,44 @@ def _one(query: dict[str, list[str]], key: str) -> str | None:
             HTTPStatus.BAD_REQUEST, "duplicate_query", f"Query parameter {key!r} must occur once."
         )
     return values[0]
+
+
+def _require_loopback_host(environ: dict[str, Any]) -> None:
+    raw_host = environ.get("HTTP_HOST")
+    parsed = None
+    try:
+        parsed = urlsplit(f"//{raw_host}") if isinstance(raw_host, str) else None
+        hostname = parsed.hostname if parsed is not None else None
+        port = parsed.port if parsed is not None else None
+    except ValueError:
+        hostname = None
+        port = None
+    valid_syntax = (
+        parsed is not None
+        and bool(raw_host)
+        and parsed.username is None
+        and parsed.password is None
+        and not parsed.path
+        and not parsed.query
+        and not parsed.fragment
+        and (port is None or 1 <= port <= 65535)
+    )
+    loopback = False
+    if valid_syntax and hostname is not None:
+        normalized = hostname.casefold()
+        if normalized == "localhost":
+            loopback = True
+        else:
+            try:
+                loopback = ipaddress.ip_address(normalized).is_loopback
+            except ValueError:
+                pass
+    if not loopback:
+        raise _RequestError(
+            HTTPStatus.FORBIDDEN,
+            "invalid_host",
+            "The Host header must identify a loopback address.",
+        )
 
 
 class _RequestError(Exception):

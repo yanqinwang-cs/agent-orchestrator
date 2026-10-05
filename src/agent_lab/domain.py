@@ -78,6 +78,8 @@ class CatalogResource(Contract):
 
 
 class CompositionBinding(Contract):
+    target: str = Field(min_length=1, max_length=80)
+    ordinal: int = Field(ge=0)
     resource_id: ResourceId
     version: Version
     digest: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -127,9 +129,9 @@ class CompositionDraft(Contract):
 
     @model_validator(mode="after")
     def unique_bindings_and_model_slots(self) -> CompositionDraft:
-        resource_ids = [binding.resource_id for binding in self.bindings]
-        if len(resource_ids) != len(set(resource_ids)):
-            raise ValueError("A resource can be bound only once in a composition.")
+        binding_positions = [(binding.target, binding.ordinal) for binding in self.bindings]
+        if len(binding_positions) != len(set(binding_positions)):
+            raise ValueError("Binding ordinals must be unique within each target.")
         slots = [settings.slot for settings in self.model_settings]
         if len(slots) != len(set(slots)):
             raise ValueError("Model settings slots must be unique within a composition.")

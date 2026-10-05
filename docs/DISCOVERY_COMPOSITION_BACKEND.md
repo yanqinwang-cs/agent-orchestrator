@@ -11,20 +11,20 @@ uv run agent-lab-api --help
 uv run agent-lab-api --database ~/.agent-lab/agent-lab.sqlite3 --port 8765
 ```
 
-The server binds only to `127.0.0.1`. Composition endpoints are a local single-user workspace, not an authenticated access-control system. Do not expose this server on a network or use it as a multi-user service. It does not implement accounts, teams, invitations, or sharing.
+The server binds only to `127.0.0.1` and rejects requests whose `Host` header is not `localhost` or a loopback IP address. Composition endpoints are a local single-user workspace, not an authenticated access-control system. Do not expose this server on a network or use it as a multi-user service. It does not implement accounts, teams, invitations, or sharing.
 
-The database path can also be set with `AGENT_LAB_DATABASE`. A file-backed database is required. SQLite `PRAGMA user_version` is `1` for this schema. A version mismatch fails closed rather than interpreting an unknown schema.
+The database path can also be set with `AGENT_LAB_DATABASE`. A file-backed database is required. The database and SQLite sidecar files are forced to owner-read/write permissions, including when a custom path already exists. SQLite `PRAGMA user_version` is `1` for this schema. A version mismatch fails closed rather than interpreting an unknown schema.
 
 ## Persistence contracts
 
-- `catalog_definitions` holds stable resource IDs, kinds, names, and discovery summaries.
+- `catalog_definitions` holds stable resource IDs and kinds plus current names and discovery summaries. Initialization refreshes display metadata for a matching stable identity and rejects kind drift.
 - `catalog_versions` holds immutable version labels, content, metadata, and SHA-256 digests. SQLite triggers reject updates and deletes. The digest covers the resource ID, exact version, content, and metadata.
 - `compositions` is a stable saved-configuration identity with a current revision pointer.
 - `composition_revisions` holds immutable snapshots of composition name, description, instructions, schema version, model settings, and a canonical content hash. Edits append a revision and advance the current pointer in one transaction.
-- `composition_bindings` records the exact resource ID and version plus the bound display identity and digest. It has a foreign key to that exact catalog version; a missing version is an error and is never replaced with a newer one.
+- `composition_bindings` records a target and ordinal together with the exact resource ID, version, bound display identity, and digest. Targets preserve assignment and ordinals preserve order within a target. The same resource may be assigned to multiple targets. Each row has a foreign key to its exact catalog version; a missing version is an error and is never replaced with a newer one.
 - `composition_models` stores composition-scoped provider/model identifiers and non-secret scalar parameters. Credential-like parameter names are rejected; credentials and provider SDK objects are not persisted.
 
-The composition hash is SHA-256 over canonical JSON with sorted keys, normalized binding order, model settings, and `schema_version`. Reads recompute catalog and composition digests and fail if immutable bytes no longer match their recorded hashes. Duplication creates a new composition identity from an exact current or historical revision; it does not mutate or alias the source. The provider and model fields are saved exactly as supplied, but a provider may use mutable aliases; this digest identifies the saved configuration, not the provider's future model behavior or availability. Model parameters are intentionally limited to non-secret scalar JSON values in this slice.
+The composition hash is SHA-256 over canonical JSON with sorted keys, bindings ordered by target and ordinal, model settings, and `schema_version`. Reads recompute catalog and composition digests and fail if immutable bytes no longer match their recorded hashes. Duplication creates a new composition identity from an exact current or historical revision; it does not mutate or alias the source. The provider and model fields are saved exactly as supplied, but a provider may use mutable aliases; this digest identifies the saved configuration, not the provider's future model behavior or availability. Model parameters are intentionally limited to non-secret scalar JSON values in this slice.
 
 The catalog is currently seeded from `agent_lab.catalog.BUILTIN_CATALOG` at initialization. These entries are descriptive examples, not installed tools or runnable agents. There are no experiment, execution, benchmark-run, or result records.
 
@@ -43,9 +43,9 @@ Base URL: `http://127.0.0.1:8765`. All request and response bodies use JSON. Res
 | `GET /api/compositions/{id}/revisions/{revision}` | Load one exact historical snapshot. |
 | `POST /api/compositions/{id}/duplicates` | Create an independent variant from an exact revision. Optional JSON fields: `name`, `revision`. |
 
-Create/revision bodies use `name`, optional `description` and `instructions`, `bindings` as `{ "resource_id", "version" }` pairs, and optional `model_settings` entries with `slot`, `provider`, `model`, and scalar `parameters`. New compositions require at least one binding. Resource IDs and model slots must be unique within one composition/revision.
+Create/revision bodies use `name`, optional `description` and `instructions`, `bindings` as `{ "target", "ordinal", "resource_id", "version" }` entries, and optional `model_settings` entries with `slot`, `provider`, `model`, and scalar `parameters`. New compositions require at least one binding. Binding ordinals must be unique within each target, and model slots must be unique within one composition revision.
 
-Errors are JSON. Invalid input and missing exact bindings return `422`; unknown compositions or revisions return `404`; stale revision saves return `409`. Unsupported content types return `415`, oversized request bodies return `413`, and malformed JSON returns `400`. The API does not launch or benchmark a saved composition.
+Errors are JSON. Invalid input and missing exact bindings return `422`; unknown compositions or revisions return `404`; stale revision saves return `409`; and rejected hosts return `403`. Unsupported content types return `415`, oversized request bodies return `413`, and malformed JSON returns `400`. The API does not launch or benchmark a saved composition.
 
 ## Validation
 

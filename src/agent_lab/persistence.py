@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import uuid
 from collections.abc import Sequence
@@ -83,12 +84,14 @@ CREATE TABLE IF NOT EXISTS composition_models (
 CREATE TABLE IF NOT EXISTS composition_bindings (
     composition_id TEXT NOT NULL,
     revision INTEGER NOT NULL,
+    binding_target TEXT NOT NULL,
+    binding_ordinal INTEGER NOT NULL CHECK (binding_ordinal >= 0),
     resource_id TEXT NOT NULL,
     resource_version TEXT NOT NULL,
     resource_name TEXT NOT NULL,
     resource_kind TEXT NOT NULL,
     version_digest TEXT NOT NULL,
-    PRIMARY KEY (composition_id, revision, resource_id),
+    PRIMARY KEY (composition_id, revision, binding_target, binding_ordinal),
     FOREIGN KEY (composition_id, revision)
         REFERENCES composition_revisions(composition_id, revision) ON DELETE RESTRICT,
     FOREIGN KEY (resource_id, resource_version)
@@ -182,13 +185,15 @@ def _composition_digest(
             "instructions": instructions,
             "bindings": [
                 {
+                    "target": item.target,
+                    "ordinal": item.ordinal,
                     "resource_id": item.resource_id,
                     "version": item.version,
                     "digest": item.digest,
                     "name": item.name,
                     "kind": item.kind.value,
                 }
-                for item in sorted(bindings, key=lambda item: item.resource_id)
+                for item in sorted(bindings, key=lambda item: (item.target, item.ordinal))
             ],
             "model_settings": [
                 item.model_dump(mode="json")
@@ -214,16 +219,30 @@ class SQLiteStore:
         if self.database != ":memory:":
             self.database = str(Path(self.database).expanduser())
             Path(self.database).parent.mkdir(parents=True, exist_ok=True)
+            self._secure_database_files()
         else:
             raise ValueError("SQLiteStore requires a file-backed database for durable persistence.")
         self.initialize()
 
     def _connect(self) -> sqlite3.Connection:
+        self._secure_database_files()
         connection = sqlite3.connect(self.database, timeout=10)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA busy_timeout = 10000")
         return connection
+
+    def _secure_database_files(self) -> None:
+        descriptor = os.open(self.database, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            os.fchmod(descriptor, 0o600)
+        finally:
+            os.close(descriptor)
+        for suffix in ("-journal", "-wal", "-shm"):
+            try:
+                os.chmod(f"{self.database}{suffix}", 0o600)
+            except FileNotFoundError:
+                pass
 
     def initialize(self) -> None:
         with self._connect() as connection:
@@ -250,11 +269,17 @@ class SQLiteStore:
                 raise CatalogIntegrityError(
                     f"Catalog identity {definition.id!r} changed kind; refusing to rewrite it."
                 )
-            connection.execute(
-                """INSERT OR IGNORE INTO catalog_definitions
-                   (id, kind, name, summary, created_at) VALUES (?, ?, ?, ?, ?)""",
-                (definition.id, definition.kind.value, definition.name, definition.summary, now),
-            )
+            if existing is None:
+                connection.execute(
+                    """INSERT INTO catalog_definitions
+                       (id, kind, name, summary, created_at) VALUES (?, ?, ?, ?, ?)""",
+                    (definition.id, definition.kind.value, definition.name, definition.summary, now),
+                )
+            else:
+                connection.execute(
+                    "UPDATE catalog_definitions SET name = ?, summary = ? WHERE id = ?",
+                    (definition.name, definition.summary, definition.id),
+                )
             for seeded in entry.versions:
                 metadata_json = json.dumps(
                     seeded.metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -373,7 +398,7 @@ class SQLiteStore:
         name: str,
         description: str,
         instructions: str,
-        bindings: Sequence[tuple[str, str]],
+        bindings: Sequence[tuple[str, int, str, str]],
         model_settings: Sequence[ModelSettings] = (),
         composition_id: str | None = None,
         expected_revision: int | None = None,
@@ -405,7 +430,7 @@ class SQLiteStore:
                 created_at = current["created_at"]
 
             resolved: list[CompositionBinding] = []
-            for resource_id, version in bindings:
+            for target, ordinal, resource_id, version in bindings:
                 row = connection.execute(
                     """SELECT d.id, d.kind, d.name, v.version, v.digest
                        FROM catalog_definitions AS d
@@ -420,6 +445,8 @@ class SQLiteStore:
                     )
                 resolved.append(
                     CompositionBinding(
+                        target=target,
+                        ordinal=ordinal,
                         resource_id=row["id"],
                         version=row["version"],
                         digest=row["digest"],
@@ -467,13 +494,16 @@ class SQLiteStore:
             )
             connection.executemany(
                 """INSERT INTO composition_bindings
-                   (composition_id, revision, resource_id, resource_version,
+                   (composition_id, revision, binding_target, binding_ordinal,
+                    resource_id, resource_version,
                     resource_name, resource_kind, version_digest)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [
                     (
                         saved_id,
                         revision_number,
+                        item.target,
+                        item.ordinal,
                         item.resource_id,
                         item.version,
                         item.name,
@@ -544,7 +574,10 @@ class SQLiteStore:
             name=copy_name,
             description=source.description,
             instructions=source.instructions,
-            bindings=tuple((item.resource_id, item.version) for item in source.bindings),
+            bindings=tuple(
+                (item.target, item.ordinal, item.resource_id, item.version)
+                for item in source.bindings
+            ),
             model_settings=source.model_settings,
         )
 
@@ -599,13 +632,14 @@ class SQLiteStore:
         self, connection: sqlite3.Connection, row: sqlite3.Row
     ) -> CompositionRevision:
         binding_rows = connection.execute(
-            """SELECT b.resource_id, b.resource_version, b.resource_name,
+            """SELECT b.binding_target, b.binding_ordinal, b.resource_id,
+                      b.resource_version, b.resource_name,
                       b.resource_kind, b.version_digest, v.digest AS actual_digest
                FROM composition_bindings AS b
                JOIN catalog_versions AS v
                  ON v.resource_id = b.resource_id AND v.version = b.resource_version
                WHERE b.composition_id = ? AND b.revision = ?
-               ORDER BY b.resource_name COLLATE NOCASE, b.resource_id""",
+               ORDER BY b.binding_target, b.binding_ordinal""",
             (row["composition_id"], row["revision"]),
         ).fetchall()
         if any(item["version_digest"] != item["actual_digest"] for item in binding_rows):
@@ -615,6 +649,8 @@ class SQLiteStore:
             )
         bindings = tuple(
             CompositionBinding(
+                target=item["binding_target"],
+                ordinal=item["binding_ordinal"],
                 resource_id=item["resource_id"],
                 version=item["resource_version"],
                 digest=item["version_digest"],

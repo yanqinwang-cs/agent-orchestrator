@@ -17,6 +17,7 @@ def request(
     *,
     query: dict[str, str] | None = None,
     body: Any = None,
+    host: str | None = "127.0.0.1",
 ) -> tuple[int, dict[str, str], Any]:
     encoded = b"" if body is None else json.dumps(body).encode("utf-8")
     environ: dict[str, Any] = {}
@@ -29,6 +30,10 @@ def request(
         CONTENT_LENGTH=str(len(encoded)),
         **{"wsgi.input": io.BytesIO(encoded)},
     )
+    if host is not None:
+        environ["HTTP_HOST"] = host
+    else:
+        environ.pop("HTTP_HOST", None)
     response: dict[str, Any] = {}
 
     def start_response(status: str, headers: list[tuple[str, str]]) -> None:
@@ -38,6 +43,21 @@ def request(
     result = b"".join(application(environ, start_response))
     parsed = json.loads(result) if result else None
     return response["status"], response["headers"], parsed
+
+
+def binding(
+    resource_id: str,
+    version: str,
+    *,
+    target: str = "main",
+    ordinal: int = 0,
+) -> dict[str, str | int]:
+    return {
+        "target": target,
+        "ordinal": ordinal,
+        "resource_id": resource_id,
+        "version": version,
+    }
 
 
 def test_catalog_api_search_and_detail_use_shared_resource_versions(tmp_path) -> None:
@@ -62,7 +82,11 @@ def test_api_creates_revises_retrieves_and_duplicates_compositions(tmp_path) -> 
         "name": "Research baseline",
         "description": "First variant",
         "instructions": "Cite source material.",
-        "bindings": [{"resource_id": "prompt/clarify-task", "version": "1.0.0"}],
+        "bindings": [
+            binding("skill/review-checklist", "1.1.0", target="planner", ordinal=1),
+            binding("prompt/clarify-task", "1.0.0", target="reviewer"),
+            binding("prompt/clarify-task", "1.0.0", target="planner"),
+        ],
         "model_settings": [
             {
                 "slot": "main",
@@ -77,11 +101,19 @@ def test_api_creates_revises_retrieves_and_duplicates_compositions(tmp_path) -> 
     assert headers["Location"] == f"/api/compositions/{created['id']}"
     composition_id = created["id"]
     assert created["revision"]["model_settings"][0]["model"] == "model-snapshot-1"
+    assert [
+        (item["target"], item["ordinal"], item["resource_id"])
+        for item in created["revision"]["bindings"]
+    ] == [
+        ("planner", 0, "prompt/clarify-task"),
+        ("planner", 1, "skill/review-checklist"),
+        ("reviewer", 0, "prompt/clarify-task"),
+    ]
 
     updated_payload = {
         **payload,
         "description": "Second variant",
-        "bindings": [{"resource_id": "skill/review-checklist", "version": "1.1.0"}],
+        "bindings": [binding("skill/review-checklist", "1.1.0")],
         "expected_revision": 1,
     }
     status, _, updated = request(
@@ -118,7 +150,7 @@ def test_api_rejects_missing_versions_secrets_and_stale_writes(tmp_path) -> None
     api = SQLiteApi(SQLiteStore(tmp_path / "api.sqlite3"))
     invalid = {
         "name": "Invalid",
-        "bindings": [{"resource_id": "skill/review-checklist", "version": "99.0.0"}],
+        "bindings": [binding("skill/review-checklist", "99.0.0")],
     }
     status, _, error = request(api, "POST", "/api/compositions", body=invalid)
     assert status == 422
@@ -127,7 +159,7 @@ def test_api_rejects_missing_versions_secrets_and_stale_writes(tmp_path) -> None
 
     secret = {
         "name": "Secret-bearing config",
-        "bindings": [{"resource_id": "prompt/clarify-task", "version": "1.0.0"}],
+        "bindings": [binding("prompt/clarify-task", "1.0.0")],
         "model_settings": [
             {
                 "slot": "main",
@@ -147,7 +179,7 @@ def test_api_rejects_missing_versions_secrets_and_stale_writes(tmp_path) -> None
 
     valid = {
         "name": "First",
-        "bindings": [{"resource_id": "prompt/clarify-task", "version": "1.0.0"}],
+        "bindings": [binding("prompt/clarify-task", "1.0.0")],
     }
     status, _, created = request(api, "POST", "/api/compositions", body=valid)
     assert status == 201
@@ -186,6 +218,7 @@ def test_api_validates_methods_and_json_request_bodies(tmp_path) -> None:
         PATH_INFO="/api/compositions",
         CONTENT_TYPE="text/plain",
         CONTENT_LENGTH="2",
+        HTTP_HOST="127.0.0.1",
         **{"wsgi.input": io.BytesIO(b"{}")},
     )
     response: dict[str, Any] = {}
@@ -196,3 +229,33 @@ def test_api_validates_methods_and_json_request_bodies(tmp_path) -> None:
     body = b"".join(api(environ, start_response))
     assert response["status"] == 415
     assert json.loads(body)["error"] == "unsupported_media_type"
+
+
+def test_api_rejects_non_loopback_or_missing_host_before_dispatch(tmp_path) -> None:
+    api = SQLiteApi(SQLiteStore(tmp_path / "api.sqlite3"))
+    payload = {
+        "name": "Must not persist",
+        "bindings": [binding("prompt/clarify-task", "1.0.0")],
+    }
+
+    status, _, error = request(
+        api,
+        "POST",
+        "/api/compositions",
+        body=payload,
+        host="attacker.example",
+    )
+    assert status == 403
+    assert error["error"] == "invalid_host"
+
+    status, _, error = request(api, "GET", "/api/catalog", host=None)
+    assert status == 403
+    assert error["error"] == "invalid_host"
+
+    status, _, catalog = request(api, "GET", "/api/catalog", host="localhost:8765")
+    assert status == 200
+    assert catalog
+
+    status, _, compositions = request(api, "GET", "/api/compositions")
+    assert status == 200
+    assert compositions == []

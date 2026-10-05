@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from stat import S_IMODE
 
 import pytest
 from pydantic import ValidationError
@@ -11,11 +12,21 @@ from agent_lab.domain import (
     ResourceKind,
     StaleCompositionError,
 )
-from agent_lab.persistence import PersistenceIntegrityError, SQLiteStore
+from agent_lab.persistence import CatalogIntegrityError, PersistenceIntegrityError, SQLiteStore
 
 
 def make_store(tmp_path, name: str = "agent-lab.sqlite3") -> SQLiteStore:
     return SQLiteStore(tmp_path / name)
+
+
+def binding(
+    resource_id: str,
+    version: str,
+    *,
+    target: str = "main",
+    ordinal: int = 0,
+) -> tuple[str, int, str, str]:
+    return target, ordinal, resource_id, version
 
 
 def test_catalog_search_filters_categories_and_exposes_exact_versions(tmp_path) -> None:
@@ -39,7 +50,7 @@ def test_composition_save_load_and_edit_pin_exact_catalog_version(tmp_path) -> N
         name="Review setup",
         description="First saved variant",
         instructions="Keep findings actionable.",
-        bindings=(("skill/review-checklist", "1.0.0"),),
+        bindings=(binding("skill/review-checklist", "1.0.0"),),
         model_settings=(
             ModelSettings(
                 slot="reviewer",
@@ -66,7 +77,7 @@ def test_composition_save_load_and_edit_pin_exact_catalog_version(tmp_path) -> N
         name="Review setup",
         description="Updated variant",
         instructions="Report confirmed defects first.",
-        bindings=(("skill/review-checklist", "1.1.0"),),
+        bindings=(binding("skill/review-checklist", "1.1.0"),),
         model_settings=original.revision.model_settings,
     )
     assert changed.current_revision == 2
@@ -82,7 +93,7 @@ def test_duplicate_variant_copies_an_exact_historical_revision(tmp_path) -> None
         name="Research agent",
         description="A baseline",
         instructions="Cite evidence.",
-        bindings=(("prompt/clarify-task", "1.0.0"),),
+        bindings=(binding("prompt/clarify-task", "1.0.0"),),
         model_settings=(ModelSettings(slot="main", provider="provider-a", model="model-a"),),
     )
     store.save_composition(
@@ -91,7 +102,7 @@ def test_duplicate_variant_copies_an_exact_historical_revision(tmp_path) -> None
         name="Research agent",
         description="Changed later",
         instructions="Use a different instruction set.",
-        bindings=(("skill/review-checklist", "1.1.0"),),
+        bindings=(binding("skill/review-checklist", "1.1.0"),),
     )
 
     duplicate = store.duplicate_composition(first.id, revision=1, name="Evidence variant")
@@ -103,25 +114,25 @@ def test_duplicate_variant_copies_an_exact_historical_revision(tmp_path) -> None
     assert duplicate.revision.model_settings == first.revision.model_settings
 
 
-def test_missing_and_duplicate_bindings_fail_without_persisting(tmp_path) -> None:
+def test_missing_bindings_and_duplicate_target_ordinals_fail_without_persisting(tmp_path) -> None:
     store = make_store(tmp_path)
     with pytest.raises(MissingBindingError, match="no newer version was substituted"):
         store.save_composition(
             name="Invalid",
             description="",
             instructions="",
-            bindings=(("skill/review-checklist", "9.9.9"),),
+            bindings=(binding("skill/review-checklist", "9.9.9"),),
         )
     assert store.list_compositions() == ()
 
-    with pytest.raises(ValidationError, match="resource can be bound only once"):
+    with pytest.raises(ValidationError, match="ordinals must be unique"):
         store.save_composition(
             name="Duplicate resource",
             description="",
             instructions="",
             bindings=(
-                ("skill/review-checklist", "1.0.0"),
-                ("skill/review-checklist", "1.1.0"),
+                binding("skill/review-checklist", "1.0.0"),
+                binding("skill/review-checklist", "1.1.0"),
             ),
         )
     with pytest.raises(ValidationError, match="at least 1 item"):
@@ -140,7 +151,7 @@ def test_stale_revision_cannot_overwrite_newer_save(tmp_path) -> None:
         name="Agent",
         description="",
         instructions="",
-        bindings=(("prompt/clarify-task", "1.0.0"),),
+        bindings=(binding("prompt/clarify-task", "1.0.0"),),
     )
     second = store.save_composition(
         composition_id=first.id,
@@ -148,7 +159,7 @@ def test_stale_revision_cannot_overwrite_newer_save(tmp_path) -> None:
         name="Agent",
         description="second revision",
         instructions="",
-        bindings=(("prompt/clarify-task", "1.0.0"),),
+        bindings=(binding("prompt/clarify-task", "1.0.0"),),
     )
     with pytest.raises(StaleCompositionError):
         store.save_composition(
@@ -157,7 +168,7 @@ def test_stale_revision_cannot_overwrite_newer_save(tmp_path) -> None:
             name="Agent",
             description="stale revision",
             instructions="",
-            bindings=(("prompt/clarify-task", "1.0.0"),),
+            bindings=(binding("prompt/clarify-task", "1.0.0"),),
         )
     assert store.get_composition(first.id).current_revision == second.current_revision
 
@@ -190,7 +201,7 @@ def test_model_settings_reject_credentials_and_allow_nonsecret_parameters(tmp_pa
         name="Configured agent",
         description="",
         instructions="",
-        bindings=(("prompt/clarify-task", "1.0.0"),),
+        bindings=(binding("prompt/clarify-task", "1.0.0"),),
         model_settings=(
             ModelSettings(
                 slot="main",
@@ -229,7 +240,7 @@ def test_saved_binding_keeps_its_display_snapshot_when_definition_changes(tmp_pa
         name="Pinned catalog binding",
         description="",
         instructions="",
-        bindings=(("prompt/clarify-task", "1.0.0"),),
+        bindings=(binding("prompt/clarify-task", "1.0.0"),),
     )
     with sqlite3.connect(database) as connection:
         connection.execute(
@@ -248,3 +259,74 @@ def test_database_records_a_schema_version(tmp_path) -> None:
     SQLiteStore(database)
     with sqlite3.connect(database) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+
+
+def test_binding_targets_and_order_survive_reload_and_resource_reuse(tmp_path) -> None:
+    database = tmp_path / "agent-lab.sqlite3"
+    store = SQLiteStore(database)
+    saved = store.save_composition(
+        name="Planner and reviewer",
+        description="",
+        instructions="",
+        bindings=(
+            binding("skill/review-checklist", "1.1.0", target="planner", ordinal=1),
+            binding("prompt/clarify-task", "1.0.0", target="reviewer", ordinal=0),
+            binding("prompt/clarify-task", "1.0.0", target="planner", ordinal=0),
+        ),
+    )
+
+    reloaded = SQLiteStore(database).get_composition(saved.id)
+    assert reloaded is not None
+    assert [
+        (item.target, item.ordinal, item.resource_id) for item in reloaded.revision.bindings
+    ] == [
+        ("planner", 0, "prompt/clarify-task"),
+        ("planner", 1, "skill/review-checklist"),
+        ("reviewer", 0, "prompt/clarify-task"),
+    ]
+    assert reloaded.revision.content_hash == saved.revision.content_hash
+
+
+def test_reopening_catalog_refreshes_display_metadata_but_rejects_kind_drift(tmp_path) -> None:
+    database = tmp_path / "agent-lab.sqlite3"
+    SQLiteStore(database)
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "UPDATE catalog_definitions SET name = ?, summary = ? WHERE id = ?",
+            ("Stale name", "Stale summary", "prompt/clarify-task"),
+        )
+
+    refreshed = SQLiteStore(database).get_resource("prompt/clarify-task")
+    assert refreshed is not None
+    assert refreshed.definition.name == "Clarify a task"
+    assert refreshed.definition.summary == (
+        "A prompt structure for making objectives and acceptance criteria explicit."
+    )
+
+    with sqlite3.connect(database) as connection:
+        connection.execute("DROP TRIGGER catalog_definition_identity_no_update")
+        connection.execute(
+            "UPDATE catalog_definitions SET kind = ? WHERE id = ?",
+            ("skill", "prompt/clarify-task"),
+        )
+    with pytest.raises(CatalogIntegrityError, match="changed kind"):
+        SQLiteStore(database)
+
+
+def test_database_and_rollback_journal_are_owner_only(tmp_path) -> None:
+    database = tmp_path / "agent-lab.sqlite3"
+    database.touch(mode=0o666)
+    database.chmod(0o666)
+    SQLiteStore(database)
+    assert S_IMODE(database.stat().st_mode) == 0o600
+
+    with sqlite3.connect(database) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            "UPDATE catalog_definitions SET summary = ? WHERE id = ?",
+            ("Temporary uncommitted summary", "prompt/clarify-task"),
+        )
+        journal = database.with_name(f"{database.name}-journal")
+        assert journal.exists()
+        assert S_IMODE(journal.stat().st_mode) == 0o600
+        connection.rollback()
