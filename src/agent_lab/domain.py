@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
@@ -35,6 +35,8 @@ Version = Annotated[
 MAX_PERSISTED_INTEGER = (1 << 63) - 1
 BindingOrdinal = Annotated[int, Field(ge=0, le=MAX_PERSISTED_INTEGER)]
 RevisionNumber = Annotated[int, Field(ge=1, le=MAX_PERSISTED_INTEGER)]
+CompositionSchemaVersion = Literal[1]
+COMPOSITION_SCHEMA_VERSION: CompositionSchemaVersion = 1
 
 
 class ResourceKind(StrEnum):
@@ -142,7 +144,7 @@ class CompositionDraft(Contract):
 class CompositionRevision(Contract):
     composition_id: str
     revision: RevisionNumber
-    schema_version: int = Field(ge=1)
+    schema_version: CompositionSchemaVersion
     name: str
     description: str
     instructions: str

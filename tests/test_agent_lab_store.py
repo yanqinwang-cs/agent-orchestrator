@@ -278,6 +278,26 @@ def test_immutable_catalog_versions_and_read_digest_verification(tmp_path) -> No
         store.get_resource("skill/review-checklist")
 
 
+def test_unsupported_composition_schema_version_fails_integrity_verification(tmp_path) -> None:
+    database = tmp_path / "agent-lab.sqlite3"
+    store = SQLiteStore(database)
+    saved = store.save_composition(
+        name="Schema-bound composition",
+        description="",
+        instructions="",
+        bindings=(binding("prompt/clarify-task", "1.0.0"),),
+    )
+    with sqlite3.connect(database) as connection:
+        connection.execute("DROP TRIGGER composition_revisions_no_update")
+        connection.execute(
+            "UPDATE composition_revisions SET schema_version = 2 WHERE composition_id = ?",
+            (saved.id,),
+        )
+
+    with pytest.raises(PersistenceIntegrityError, match="unsupported schema version 2"):
+        store.get_composition(saved.id)
+
+
 def test_saved_binding_keeps_its_display_snapshot_when_definition_changes(tmp_path) -> None:
     database = tmp_path / "agent-lab.sqlite3"
     store = SQLiteStore(database)

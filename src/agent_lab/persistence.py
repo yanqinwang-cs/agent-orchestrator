@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from agent_lab.catalog import BUILTIN_CATALOG, SeedResource
 from agent_lab.domain import (
     CatalogResource,
+    COMPOSITION_SCHEMA_VERSION,
     CompositionBinding,
     CompositionDraft,
     CompositionNotFoundError,
@@ -174,6 +175,7 @@ def _version_digest(resource_id: str, version: str, body: str, metadata: dict[st
 
 def _composition_digest(
     *,
+    schema_version: int,
     name: str,
     description: str,
     instructions: str,
@@ -182,7 +184,7 @@ def _composition_digest(
 ) -> str:
     return sha256_json(
         {
-            "schema_version": 1,
+            "schema_version": schema_version,
             "name": name,
             "description": description,
             "instructions": instructions,
@@ -525,7 +527,9 @@ class SQLiteStore:
                 model_settings=tuple(model_settings),
             )
             created = utc_now()
+            revision_schema_version = COMPOSITION_SCHEMA_VERSION
             fingerprint = _composition_digest(
+                schema_version=revision_schema_version,
                 name=draft.name,
                 description=draft.description,
                 instructions=draft.instructions,
@@ -546,7 +550,7 @@ class SQLiteStore:
                 (
                     saved_id,
                     revision_number,
-                    1,
+                    revision_schema_version,
                     draft.name,
                     draft.description,
                     draft.instructions,
@@ -748,7 +752,14 @@ class SQLiteStore:
             raise PersistenceIntegrityError(
                 "Persisted composition model settings are invalid."
             ) from exc
+        schema_version = row["schema_version"]
+        if schema_version != COMPOSITION_SCHEMA_VERSION:
+            raise PersistenceIntegrityError(
+                f"Composition {row['composition_id']} revision {row['revision']} "
+                f"uses unsupported schema version {schema_version}."
+            )
         expected_hash = _composition_digest(
+            schema_version=schema_version,
             name=row["name"],
             description=row["description"],
             instructions=row["instructions"],
@@ -764,7 +775,7 @@ class SQLiteStore:
             return CompositionRevision(
                 composition_id=row["composition_id"],
                 revision=row["revision"],
-                schema_version=row["schema_version"],
+                schema_version=schema_version,
                 name=row["name"],
                 description=row["description"],
                 instructions=row["instructions"],
