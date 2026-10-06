@@ -6,6 +6,7 @@ from stat import S_IMODE
 import pytest
 from pydantic import ValidationError
 
+import agent_lab.persistence as persistence
 from agent_lab.domain import (
     MissingBindingError,
     ModelSettings,
@@ -23,10 +24,13 @@ def binding(
     resource_id: str,
     version: str,
     *,
-    target: str = "main",
+    target: str | None = None,
     ordinal: int = 0,
-) -> tuple[str, int, str, str]:
-    return target, ordinal, resource_id, version
+) -> tuple[str | None, int, str, str]:
+    resolved_target = target
+    if resolved_target is None and resource_id.startswith("prompt/"):
+        resolved_target = "main"
+    return resolved_target, ordinal, resource_id, version
 
 
 def test_catalog_search_filters_categories_and_exposes_exact_versions(tmp_path) -> None:
@@ -114,7 +118,7 @@ def test_duplicate_variant_copies_an_exact_historical_revision(tmp_path) -> None
     assert duplicate.revision.model_settings == first.revision.model_settings
 
 
-def test_missing_bindings_and_duplicate_target_ordinals_fail_without_persisting(tmp_path) -> None:
+def test_missing_bindings_and_duplicate_ordinals_fail_without_persisting(tmp_path) -> None:
     store = make_store(tmp_path)
     with pytest.raises(MissingBindingError, match="no newer version was substituted"):
         store.save_composition(
@@ -145,6 +149,39 @@ def test_missing_bindings_and_duplicate_target_ordinals_fail_without_persisting(
     assert store.list_compositions() == ()
 
 
+def test_only_prompt_bindings_accept_agent_targets(tmp_path) -> None:
+    store = make_store(tmp_path)
+
+    with pytest.raises(ValidationError, match="Only prompt bindings"):
+        store.save_composition(
+            name="Targeted skill",
+            description="",
+            instructions="",
+            bindings=(binding("skill/review-checklist", "1.0.0", target="planner"),),
+        )
+    with pytest.raises(ValidationError, match="Prompt bindings require"):
+        store.save_composition(
+            name="Untargeted prompt",
+            description="",
+            instructions="",
+            bindings=((None, 0, "prompt/clarify-task", "1.0.0"),),
+        )
+
+    saved = store.save_composition(
+        name="Prompt and skill",
+        description="",
+        instructions="",
+        bindings=(
+            binding("prompt/clarify-task", "1.0.0", target="planner", ordinal=0),
+            binding("skill/review-checklist", "1.0.0", ordinal=1),
+        ),
+    )
+    assert [(item.target, item.ordinal) for item in saved.revision.bindings] == [
+        ("planner", 0),
+        (None, 1),
+    ]
+
+
 def test_stale_revision_cannot_overwrite_newer_save(tmp_path) -> None:
     store = make_store(tmp_path)
     first = store.save_composition(
@@ -173,15 +210,15 @@ def test_stale_revision_cannot_overwrite_newer_save(tmp_path) -> None:
     assert store.get_composition(first.id).current_revision == second.current_revision
 
 
-def test_model_settings_reject_credentials_and_allow_nonsecret_parameters(tmp_path) -> None:
-    with pytest.raises(ValidationError, match="cannot contain credentials"):
+def test_model_settings_reject_credential_names_and_preserve_scalar_values(tmp_path) -> None:
+    with pytest.raises(ValidationError, match="Credential-like model parameter names"):
         ModelSettings(
             slot="main",
             provider="provider-a",
             model="model-a",
             parameters={"api_key": "not-allowed"},
         )
-    with pytest.raises(ValidationError, match="credentials or secret fields"):
+    with pytest.raises(ValidationError, match="Credential-like model parameter names"):
         ModelSettings(
             slot="main",
             provider="provider-a",
@@ -207,11 +244,19 @@ def test_model_settings_reject_credentials_and_allow_nonsecret_parameters(tmp_pa
                 slot="main",
                 provider="provider-a",
                 model="snapshot-id",
-                parameters={"temperature": 0.2, "max_tokens": 800},
+                parameters={
+                    "temperature": 0.2,
+                    "max_tokens": 800,
+                    "note": "sk-example-value-is-not-secret-scanned",
+                },
             ),
         ),
     )
     assert saved.revision.model_settings[0].model == "snapshot-id"
+    assert (
+        saved.revision.model_settings[0].parameters["note"]
+        == "sk-example-value-is-not-secret-scanned"
+    )
 
 
 def test_immutable_catalog_versions_and_read_digest_verification(tmp_path) -> None:
@@ -262,21 +307,22 @@ def test_database_records_a_schema_version(tmp_path) -> None:
     database = tmp_path / "agent-lab.sqlite3"
     SQLiteStore(database)
     with sqlite3.connect(database) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
 
 
-def test_schema_v1_database_is_rejected_without_modification(tmp_path) -> None:
-    database = tmp_path / "agent-lab-v1.sqlite3"
+@pytest.mark.parametrize("legacy_version", [1, 2])
+def test_legacy_database_is_rejected_without_modification(tmp_path, legacy_version) -> None:
+    database = tmp_path / f"agent-lab-v{legacy_version}.sqlite3"
     with sqlite3.connect(database) as connection:
         connection.execute("CREATE TABLE preserved_data (value TEXT NOT NULL)")
         connection.execute("INSERT INTO preserved_data VALUES ('keep me')")
-        connection.execute("PRAGMA user_version = 1")
+        connection.execute(f"PRAGMA user_version = {legacy_version}")
 
-    with pytest.raises(RuntimeError, match="schema 1; expected 2"):
+    with pytest.raises(RuntimeError, match=rf"schema {legacy_version}; expected 3"):
         SQLiteStore(database)
 
     with sqlite3.connect(database) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == legacy_version
         assert connection.execute("SELECT value FROM preserved_data").fetchone()[0] == "keep me"
 
 
@@ -299,6 +345,64 @@ def test_nonempty_unversioned_database_is_rejected_without_modification(tmp_path
         assert agent_lab_objects == []
 
 
+@pytest.mark.parametrize(
+    "drop_statement",
+    [
+        "DROP TABLE composition_models",
+        "DROP TRIGGER composition_models_no_delete",
+    ],
+)
+def test_incomplete_current_schema_is_rejected_before_catalog_seeding(
+    tmp_path, drop_statement
+) -> None:
+    database = tmp_path / "incomplete.sqlite3"
+    SQLiteStore(database)
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "UPDATE catalog_definitions SET name = 'Preserved stale name' WHERE id = ?",
+            ("prompt/clarify-task",),
+        )
+        connection.execute(drop_statement)
+
+    with pytest.raises(RuntimeError, match="Unsupported Agent Lab database layout"):
+        SQLiteStore(database)
+
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert (
+            connection.execute(
+                "SELECT name FROM catalog_definitions WHERE id = ?",
+                ("prompt/clarify-task",),
+            ).fetchone()[0]
+            == "Preserved stale name"
+        )
+
+
+def test_failed_fresh_schema_creation_rolls_back_objects_and_version(tmp_path, monkeypatch) -> None:
+    database = tmp_path / "interrupted.sqlite3"
+    monkeypatch.setattr(
+        persistence,
+        "_SCHEMA",
+        f"{persistence._SCHEMA}\nCREATE TABLE invalid_sql(",
+    )
+
+    with pytest.raises(sqlite3.OperationalError):
+        SQLiteStore(database)
+
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 0
+        assert connection.execute(
+            """SELECT name FROM sqlite_master
+               WHERE type IN ('table', 'view', 'trigger') AND name NOT GLOB 'sqlite_*'"""
+        ).fetchall() == []
+
+
+def test_revision_lookup_rejects_integers_outside_sqlite_range(tmp_path) -> None:
+    store = make_store(tmp_path)
+    with pytest.raises(ValueError, match="fit SQLite"):
+        store.get_composition_revision("missing", 1 << 63)
+
+
 def test_binding_targets_and_order_survive_reload_and_resource_reuse(tmp_path) -> None:
     database = tmp_path / "agent-lab.sqlite3"
     store = SQLiteStore(database)
@@ -307,9 +411,9 @@ def test_binding_targets_and_order_survive_reload_and_resource_reuse(tmp_path) -
         description="",
         instructions="",
         bindings=(
-            binding("skill/review-checklist", "1.1.0", target="planner", ordinal=1),
+            binding("skill/review-checklist", "1.1.0", ordinal=2),
             binding("prompt/clarify-task", "1.0.0", target="reviewer", ordinal=0),
-            binding("prompt/clarify-task", "1.0.0", target="planner", ordinal=0),
+            binding("prompt/clarify-task", "1.0.0", target="planner", ordinal=1),
         ),
     )
 
@@ -318,9 +422,9 @@ def test_binding_targets_and_order_survive_reload_and_resource_reuse(tmp_path) -
     assert [
         (item.target, item.ordinal, item.resource_id) for item in reloaded.revision.bindings
     ] == [
-        ("planner", 0, "prompt/clarify-task"),
-        ("planner", 1, "skill/review-checklist"),
         ("reviewer", 0, "prompt/clarify-task"),
+        ("planner", 1, "prompt/clarify-task"),
+        (None, 2, "skill/review-checklist"),
     ]
     assert reloaded.revision.content_hash == saved.revision.content_hash
 
@@ -346,6 +450,13 @@ def test_reopening_catalog_refreshes_display_metadata_but_rejects_kind_drift(tmp
         connection.execute(
             "UPDATE catalog_definitions SET kind = ? WHERE id = ?",
             ("skill", "prompt/clarify-task"),
+        )
+        connection.execute(
+            """CREATE TRIGGER IF NOT EXISTS catalog_definition_identity_no_update
+               BEFORE UPDATE OF id, kind ON catalog_definitions
+               BEGIN
+                   SELECT RAISE(ABORT, 'catalog definition identity is immutable');
+               END"""
         )
     with pytest.raises(CatalogIntegrityError, match="changed kind"):
         SQLiteStore(database)

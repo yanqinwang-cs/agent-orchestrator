@@ -10,6 +10,8 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from agent_lab.catalog import BUILTIN_CATALOG, SeedResource
 from agent_lab.domain import (
     CatalogResource,
@@ -17,6 +19,7 @@ from agent_lab.domain import (
     CompositionDraft,
     CompositionNotFoundError,
     CompositionRevision,
+    MAX_PERSISTED_INTEGER,
     MissingBindingError,
     ModelSettings,
     ResourceDefinition,
@@ -27,7 +30,7 @@ from agent_lab.domain import (
 )
 from agent_lab.identity import sha256_json
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_definitions (
@@ -84,14 +87,14 @@ CREATE TABLE IF NOT EXISTS composition_models (
 CREATE TABLE IF NOT EXISTS composition_bindings (
     composition_id TEXT NOT NULL,
     revision INTEGER NOT NULL,
-    binding_target TEXT NOT NULL,
+    binding_target TEXT,
     binding_ordinal INTEGER NOT NULL CHECK (binding_ordinal >= 0),
     resource_id TEXT NOT NULL,
     resource_version TEXT NOT NULL,
     resource_name TEXT NOT NULL,
     resource_kind TEXT NOT NULL,
     version_digest TEXT NOT NULL,
-    PRIMARY KEY (composition_id, revision, binding_target, binding_ordinal),
+    PRIMARY KEY (composition_id, revision, binding_ordinal),
     FOREIGN KEY (composition_id, revision)
         REFERENCES composition_revisions(composition_id, revision) ON DELETE RESTRICT,
     FOREIGN KEY (resource_id, resource_version)
@@ -193,7 +196,7 @@ def _composition_digest(
                     "name": item.name,
                     "kind": item.kind.value,
                 }
-                for item in sorted(bindings, key=lambda item: (item.target, item.ordinal))
+                for item in sorted(bindings, key=lambda item: item.ordinal)
             ],
             "model_settings": [
                 item.model_dump(mode="json")
@@ -208,7 +211,7 @@ class CatalogIntegrityError(RuntimeError):
 
 
 class PersistenceIntegrityError(RuntimeError):
-    """Persisted immutable content does not match its recorded digest."""
+    """Persisted Agent Lab data is invalid or fails integrity verification."""
 
 
 class SQLiteStore:
@@ -260,9 +263,48 @@ class SQLiteStore:
                     raise RuntimeError(
                         "Refusing to initialize a nonempty unversioned SQLite database."
                     )
-                connection.executescript(_SCHEMA)
-                connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                self._create_schema(connection)
+            self._validate_schema(connection)
             self._seed_catalog(connection)
+
+    @staticmethod
+    def _create_schema(connection: sqlite3.Connection) -> None:
+        try:
+            connection.executescript(
+                f"BEGIN IMMEDIATE;\n{_SCHEMA}\nPRAGMA user_version = {SCHEMA_VERSION};\nCOMMIT;"
+            )
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+
+    @staticmethod
+    def _validate_schema(connection: sqlite3.Connection) -> None:
+        with sqlite3.connect(":memory:") as reference:
+            reference.row_factory = sqlite3.Row
+            reference.executescript(_SCHEMA)
+            expected = SQLiteStore._schema_signature(reference)
+        if SQLiteStore._schema_signature(connection) != expected:
+            raise RuntimeError(
+                f"Unsupported Agent Lab database layout for schema {SCHEMA_VERSION}."
+            )
+
+    @staticmethod
+    def _schema_signature(connection: sqlite3.Connection) -> tuple[tuple[str, ...], ...]:
+        rows = connection.execute(
+            """SELECT type, name, tbl_name, sql FROM sqlite_master
+               WHERE type IN ('table', 'view', 'trigger') AND name NOT GLOB 'sqlite_*'
+               ORDER BY type, name"""
+        ).fetchall()
+        return tuple(
+            (
+                row["type"],
+                row["name"],
+                row["tbl_name"],
+                " ".join(row["sql"].split()),
+            )
+            for row in rows
+        )
 
     def _seed_catalog(
         self, connection: sqlite3.Connection, entries: Sequence[SeedResource] = BUILTIN_CATALOG
@@ -370,35 +412,41 @@ class SQLiteStore:
             (definition.id,),
         ).fetchall()
         versions_list: list[ResourceVersion] = []
-        for row in rows:
-            metadata = json.loads(row["metadata_json"])
-            expected_digest = _version_digest(
-                row["resource_id"], row["version"], row["body"], metadata
-            )
-            if expected_digest != row["digest"]:
-                raise PersistenceIntegrityError(
-                    f"Catalog version {row['resource_id']}@{row['version']} "
-                    "failed digest verification."
+        try:
+            for row in rows:
+                metadata = json.loads(row["metadata_json"])
+                expected_digest = _version_digest(
+                    row["resource_id"], row["version"], row["body"], metadata
                 )
-            versions_list.append(
-                ResourceVersion(
-                    resource_id=row["resource_id"],
-                    version=row["version"],
-                    body=row["body"],
-                    metadata=metadata,
-                    digest=row["digest"],
+                if expected_digest != row["digest"]:
+                    raise PersistenceIntegrityError(
+                        f"Catalog version {row['resource_id']}@{row['version']} "
+                        "failed digest verification."
+                    )
+                versions_list.append(
+                    ResourceVersion(
+                        resource_id=row["resource_id"],
+                        version=row["version"],
+                        body=row["body"],
+                        metadata=metadata,
+                        digest=row["digest"],
+                    )
                 )
-            )
+        except (json.JSONDecodeError, TypeError, ValidationError) as exc:
+            raise PersistenceIntegrityError("Persisted catalog version data is invalid.") from exc
         return CatalogResource(definition=definition, versions=tuple(versions_list))
 
     @staticmethod
     def _definition(row: sqlite3.Row) -> ResourceDefinition:
-        return ResourceDefinition(
-            id=row["id"],
-            kind=row["kind"],
-            name=row["name"],
-            summary=row["summary"],
-        )
+        try:
+            return ResourceDefinition(
+                id=row["id"],
+                kind=row["kind"],
+                name=row["name"],
+                summary=row["summary"],
+            )
+        except ValidationError as exc:
+            raise PersistenceIntegrityError("Persisted catalog definition data is invalid.") from exc
 
     def save_composition(
         self,
@@ -406,7 +454,7 @@ class SQLiteStore:
         name: str,
         description: str,
         instructions: str,
-        bindings: Sequence[tuple[str, int, str, str]],
+        bindings: Sequence[tuple[str | None, int, str, str]],
         model_settings: Sequence[ModelSettings] = (),
         composition_id: str | None = None,
         expected_revision: int | None = None,
@@ -436,6 +484,8 @@ class SQLiteStore:
                         "This composition changed after the form was opened. "
                         "Reload it before saving."
                     )
+                if current["current_revision"] >= MAX_PERSISTED_INTEGER:
+                    raise ValueError("Composition revision exceeds SQLite's integer range.")
                 saved_id = composition_id
                 revision_number = int(current["current_revision"]) + 1
                 created_at = current["created_at"]
@@ -594,6 +644,8 @@ class SQLiteStore:
     def get_composition_revision(
         self, composition_id: str, revision: int
     ) -> CompositionRevision | None:
+        if revision < 1 or revision > MAX_PERSISTED_INTEGER:
+            raise ValueError("Revision must fit SQLite's positive integer range.")
         with self._connect() as connection:
             row = connection.execute(
                 """SELECT * FROM composition_revisions
@@ -628,15 +680,20 @@ class SQLiteStore:
                 self._composition_revision(connection, revision_row)
                 for revision_row in revision_rows
             )
-            current = next(item for item in history if item.revision == row["current_revision"])
-            return SavedComposition(
-                id=row["id"],
-                current_revision=row["current_revision"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                revision=current,
-                history=history,
-            )
+            try:
+                current = next(item for item in history if item.revision == row["current_revision"])
+                return SavedComposition(
+                    id=row["id"],
+                    current_revision=row["current_revision"],
+                    created_at=row["created_at"],
+                    updated_at=row["updated_at"],
+                    revision=current,
+                    history=history,
+                )
+            except (StopIteration, ValidationError) as exc:
+                raise PersistenceIntegrityError(
+                    f"Persisted composition {composition_id} data is invalid."
+                ) from exc
 
     def _composition_revision(
         self, connection: sqlite3.Connection, row: sqlite3.Row
@@ -649,7 +706,7 @@ class SQLiteStore:
                JOIN catalog_versions AS v
                  ON v.resource_id = b.resource_id AND v.version = b.resource_version
                WHERE b.composition_id = ? AND b.revision = ?
-               ORDER BY b.binding_target, b.binding_ordinal""",
+               ORDER BY b.binding_ordinal""",
             (row["composition_id"], row["revision"]),
         ).fetchall()
         if any(item["version_digest"] != item["actual_digest"] for item in binding_rows):
@@ -657,32 +714,40 @@ class SQLiteStore:
                 f"Composition {row['composition_id']} revision {row['revision']} "
                 "references a catalog version with a mismatched digest."
             )
-        bindings = tuple(
-            CompositionBinding(
-                target=item["binding_target"],
-                ordinal=item["binding_ordinal"],
-                resource_id=item["resource_id"],
-                version=item["resource_version"],
-                digest=item["version_digest"],
-                name=item["resource_name"],
-                kind=item["resource_kind"],
+        try:
+            bindings = tuple(
+                CompositionBinding(
+                    target=item["binding_target"],
+                    ordinal=item["binding_ordinal"],
+                    resource_id=item["resource_id"],
+                    version=item["resource_version"],
+                    digest=item["version_digest"],
+                    name=item["resource_name"],
+                    kind=item["resource_kind"],
+                )
+                for item in binding_rows
             )
-            for item in binding_rows
-        )
+        except ValidationError as exc:
+            raise PersistenceIntegrityError("Persisted composition binding data is invalid.") from exc
         model_rows = connection.execute(
             """SELECT slot, provider, model, parameters_json FROM composition_models
                WHERE composition_id = ? AND revision = ? ORDER BY slot""",
             (row["composition_id"], row["revision"]),
         ).fetchall()
-        model_settings = tuple(
-            ModelSettings(
-                slot=item["slot"],
-                provider=item["provider"],
-                model=item["model"],
-                parameters=json.loads(item["parameters_json"]),
+        try:
+            model_settings = tuple(
+                ModelSettings(
+                    slot=item["slot"],
+                    provider=item["provider"],
+                    model=item["model"],
+                    parameters=json.loads(item["parameters_json"]),
+                )
+                for item in model_rows
             )
-            for item in model_rows
-        )
+        except (json.JSONDecodeError, TypeError, ValidationError) as exc:
+            raise PersistenceIntegrityError(
+                "Persisted composition model settings are invalid."
+            ) from exc
         expected_hash = _composition_digest(
             name=row["name"],
             description=row["description"],
@@ -695,15 +760,18 @@ class SQLiteStore:
                 f"Composition {row['composition_id']} revision {row['revision']} "
                 "failed digest verification."
             )
-        return CompositionRevision(
-            composition_id=row["composition_id"],
-            revision=row["revision"],
-            schema_version=row["schema_version"],
-            name=row["name"],
-            description=row["description"],
-            instructions=row["instructions"],
-            content_hash=row["content_hash"],
-            created_at=row["created_at"],
-            bindings=bindings,
-            model_settings=model_settings,
-        )
+        try:
+            return CompositionRevision(
+                composition_id=row["composition_id"],
+                revision=row["revision"],
+                schema_version=row["schema_version"],
+                name=row["name"],
+                description=row["description"],
+                instructions=row["instructions"],
+                content_hash=row["content_hash"],
+                created_at=row["created_at"],
+                bindings=bindings,
+                model_settings=model_settings,
+            )
+        except ValidationError as exc:
+            raise PersistenceIntegrityError("Persisted composition revision data is invalid.") from exc

@@ -32,6 +32,9 @@ Version = Annotated[
         pattern=r"^[A-Za-z0-9][A-Za-z0-9.+_-]*$",
     ),
 ]
+MAX_PERSISTED_INTEGER = (1 << 63) - 1
+BindingOrdinal = Annotated[int, Field(ge=0, le=MAX_PERSISTED_INTEGER)]
+RevisionNumber = Annotated[int, Field(ge=1, le=MAX_PERSISTED_INTEGER)]
 
 
 class ResourceKind(StrEnum):
@@ -68,13 +71,21 @@ class CatalogResource(Contract):
 
 
 class CompositionBinding(Contract):
-    target: str = Field(min_length=1, max_length=80)
-    ordinal: int = Field(ge=0)
+    target: str | None = Field(default=None, min_length=1, max_length=80)
+    ordinal: BindingOrdinal
     resource_id: ResourceId
     version: Version
     digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     name: str = Field(min_length=1, max_length=120)
     kind: ResourceKind
+
+    @model_validator(mode="after")
+    def target_only_prompts(self) -> CompositionBinding:
+        if self.kind == ResourceKind.PROMPT and self.target is None:
+            raise ValueError("Prompt bindings require an agent target.")
+        if self.kind != ResourceKind.PROMPT and self.target is not None:
+            raise ValueError("Only prompt bindings may specify an agent target.")
+        return self
 
 
 ModelParameter = str | int | FiniteFloat | bool | None
@@ -88,7 +99,7 @@ class ModelSettings(Contract):
 
     @field_validator("parameters")
     @classmethod
-    def reject_secret_fields(
+    def reject_credential_field_names(
         cls, parameters: dict[str, ModelParameter]
     ) -> dict[str, ModelParameter]:
         sensitive_name = re.compile(
@@ -104,7 +115,7 @@ class ModelSettings(Contract):
         ]
         if forbidden:
             raise ValueError(
-                "Model settings cannot contain credentials or secret fields: "
+                "Credential-like model parameter names are not allowed: "
                 + ", ".join(sorted(forbidden))
             )
         return parameters
@@ -119,9 +130,9 @@ class CompositionDraft(Contract):
 
     @model_validator(mode="after")
     def unique_bindings_and_model_slots(self) -> CompositionDraft:
-        binding_positions = [(binding.target, binding.ordinal) for binding in self.bindings]
-        if len(binding_positions) != len(set(binding_positions)):
-            raise ValueError("Binding ordinals must be unique within each target.")
+        binding_ordinals = [binding.ordinal for binding in self.bindings]
+        if len(binding_ordinals) != len(set(binding_ordinals)):
+            raise ValueError("Binding ordinals must be unique within a composition.")
         slots = [settings.slot for settings in self.model_settings]
         if len(slots) != len(set(slots)):
             raise ValueError("Model settings slots must be unique within a composition.")
@@ -130,7 +141,7 @@ class CompositionDraft(Contract):
 
 class CompositionRevision(Contract):
     composition_id: str
-    revision: int = Field(ge=1)
+    revision: RevisionNumber
     schema_version: int = Field(ge=1)
     name: str
     description: str
@@ -143,7 +154,7 @@ class CompositionRevision(Contract):
 
 class SavedComposition(Contract):
     id: str
-    current_revision: int = Field(ge=1)
+    current_revision: RevisionNumber
     created_at: str
     updated_at: str
     revision: CompositionRevision

@@ -12,16 +12,19 @@ from urllib.parse import parse_qs, urlsplit
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agent_lab.domain import (
+    BindingOrdinal,
     CompositionNotFoundError,
+    MAX_PERSISTED_INTEGER,
     MissingBindingError,
     ModelSettings,
     ResourceId,
     ResourceKind,
+    RevisionNumber,
     SavedComposition,
     StaleCompositionError,
     Version,
 )
-from agent_lab.persistence import SQLiteStore
+from agent_lab.persistence import PersistenceIntegrityError, SQLiteStore
 
 
 class ApiContract(BaseModel):
@@ -29,8 +32,8 @@ class ApiContract(BaseModel):
 
 
 class BindingSelection(ApiContract):
-    target: str = Field(min_length=1, max_length=80)
-    ordinal: int = Field(ge=0)
+    target: str | None = Field(default=None, min_length=1, max_length=80)
+    ordinal: BindingOrdinal
     resource_id: ResourceId
     version: Version
 
@@ -44,12 +47,12 @@ class CompositionSaveRequest(ApiContract):
 
 
 class RevisionSaveRequest(CompositionSaveRequest):
-    expected_revision: int = Field(ge=1)
+    expected_revision: RevisionNumber
 
 
 class DuplicateRequest(ApiContract):
     name: str | None = Field(default=None, min_length=1, max_length=120)
-    revision: int | None = Field(default=None, ge=1)
+    revision: RevisionNumber | None = None
 
 
 class SQLiteApi:
@@ -96,6 +99,15 @@ class SQLiteApi:
             status, payload, headers = (
                 HTTPStatus.CONFLICT,
                 {"error": "stale_revision", "message": str(exc)},
+                [],
+            )
+        except PersistenceIntegrityError:
+            status, payload, headers = (
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {
+                    "error": "persistence_integrity_error",
+                    "message": "Persisted Agent Lab data failed integrity validation.",
+                },
                 [],
             )
         except ValueError as exc:
@@ -215,6 +227,12 @@ class SQLiteApi:
                 raise _RequestError(
                     HTTPStatus.BAD_REQUEST, "invalid_revision", "Revision must be an integer."
                 ) from exc
+            if revision_number < 1 or revision_number > MAX_PERSISTED_INTEGER:
+                raise _RequestError(
+                    HTTPStatus.BAD_REQUEST,
+                    "invalid_revision",
+                    "Revision must fit SQLite's positive integer range.",
+                )
             revision = self.store.get_composition_revision(composition_id, revision_number)
             if revision is None:
                 return (
