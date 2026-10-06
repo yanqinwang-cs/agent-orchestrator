@@ -1,6 +1,6 @@
 # Development
 
-[AGENTS.md](../AGENTS.md) governs the project. This document describes how to validate the surviving implementation. Proposed migration work is in [CODEBASE_MIGRATION_PLAN.md](CODEBASE_MIGRATION_PLAN.md); it requires human review before consequential contract changes or code deletion.
+[AGENTS.md](../AGENTS.md) governs the project. This document describes how to validate the surviving implementation.
 
 ## Offline baseline
 
@@ -43,7 +43,7 @@ uv run agent-orchestrator validate-config presets/workflows/review.toml
 uv run python scripts/check_starter.py
 ```
 
-The schema regression in `tests/test_cli_and_schemas.py` generates schemas in a temporary directory and compares them with committed bytes. For an authorized contract change, `uv run python scripts/export_schemas.py` regenerates the committed schemas. Do not regenerate them for this documentation cleanup.
+The schema regression in `tests/test_cli_and_schemas.py` generates schemas in a temporary directory and compares them with committed bytes. For an authorized contract change, `uv run python scripts/export_schemas.py` regenerates the committed schemas.
 
 `config/project.example.toml` has a placeholder project path and an empty model catalog. Successful configuration validation does not establish readiness for live execution. The build metadata and locked Codex dependency still belong to the previous implementation.
 
