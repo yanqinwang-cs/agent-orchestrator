@@ -8,6 +8,16 @@ The repository is being repurposed from the old Agent Orchestrator into the publ
 
 Git history is the archive for obsolete work. Active files should reflect the current project only.
 
+## Current work and authority boundaries
+
+The current task is to build the testing website: a benchmarking platform for the harness that includes skills, plugins, MCPs, and related integrations.
+Clarify the website's users, experiment flows, and evaluation requirements before fixing its implementation scope.
+Website work does not authorize building, completing, or modifying the harness.
+Do not consult, mention, or follow the previous milestone document unless the user explicitly asks to revisit it or explicitly authorizes continuing harness work.
+
+The current product hypothesis is a translator that intelligently chooses representation formats for information transfer between agents, tool interfaces, and other intelligent-system boundaries.
+This hypothesis is context only; do not begin its design or implementation without explicit user authorization.
+
 ## Project purpose
 
 This repository supports a venture/research project around **intelligent-system interfaces and experimentation**.

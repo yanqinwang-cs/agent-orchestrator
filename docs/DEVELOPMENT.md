@@ -1,6 +1,6 @@
 # Development
 
-[AGENTS.md](../AGENTS.md) governs the project. This document describes how to validate the surviving implementation. Proposed migration work is in [CODEBASE_MIGRATION_PLAN.md](CODEBASE_MIGRATION_PLAN.md); it requires human review before consequential contract changes or code deletion.
+[AGENTS.md](../AGENTS.md) governs the project. This document describes how to validate the surviving implementation.
 
 ## Offline baseline
 
@@ -19,6 +19,17 @@ uv run agent-orchestrator --version
 
 The default CLI reports that run commands and the UI are unavailable. Its old milestone wording is an implementation cleanup item, not a current roadmap. The offline suite uses local fixtures, fake workers, and local process-owner probes; it makes no live provider calls.
 
+## Agent Lab backend
+
+The backend-only discovery/composition API is independent of the legacy runtime. It uses a file-backed SQLite database and binds only to loopback; do not expose it as a multi-user service. See [backend contracts](DISCOVERY_COMPOSITION_BACKEND.md) for the data model and routes.
+
+```sh
+PYTHONPATH=src uv run pytest -q tests/test_agent_lab_store.py tests/test_agent_lab_http_api.py
+uv run ruff check src/agent_lab tests/test_agent_lab_store.py tests/test_agent_lab_http_api.py
+uv run mypy --follow-imports=normal src/agent_lab
+uv run agent-lab-api --help
+```
+
 ## Configuration and schemas
 
 The legacy loader requires `presets/agents.toml`, all six files under `presets/workflows/`, and `config/{project.example,backends,development}.toml`. Keep these until the loader and dependent tests are migrated together. They do not prescribe Agent Lab's future agent roles, workflow shape, or backend bindings.
@@ -32,7 +43,7 @@ uv run agent-orchestrator validate-config presets/workflows/review.toml
 uv run python scripts/check_starter.py
 ```
 
-The schema regression in `tests/test_cli_and_schemas.py` generates schemas in a temporary directory and compares them with committed bytes. For an authorized contract change, `uv run python scripts/export_schemas.py` regenerates the committed schemas. Do not regenerate them for this documentation cleanup.
+The schema regression in `tests/test_cli_and_schemas.py` generates schemas in a temporary directory and compares them with committed bytes. For an authorized contract change, `uv run python scripts/export_schemas.py` regenerates the committed schemas.
 
 `config/project.example.toml` has a placeholder project path and an empty model catalog. Successful configuration validation does not establish readiness for live execution. The build metadata and locked Codex dependency still belong to the previous implementation.
 

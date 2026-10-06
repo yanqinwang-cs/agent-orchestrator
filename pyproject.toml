@@ -15,6 +15,7 @@ dependencies = [
 
 [project.scripts]
 agent-orchestrator = "orchestrator.cli:main"
+agent-lab-api = "agent_lab.server:main"
 
 [dependency-groups]
 dev = [
@@ -25,7 +26,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/orchestrator"]
+packages = ["src/orchestrator", "src/agent_lab"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -43,6 +44,6 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.mypy]
 python_version = "3.12"
 mypy_path = "src"
-packages = ["orchestrator"]
+packages = ["orchestrator", "agent_lab"]
 show_error_codes = true
 warn_unused_configs = true
