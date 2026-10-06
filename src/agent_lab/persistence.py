@@ -14,13 +14,13 @@ from pydantic import ValidationError
 
 from agent_lab.catalog import BUILTIN_CATALOG, SeedResource
 from agent_lab.domain import (
-    CatalogResource,
     COMPOSITION_SCHEMA_VERSION,
+    MAX_PERSISTED_INTEGER,
+    CatalogResource,
     CompositionBinding,
     CompositionDraft,
     CompositionNotFoundError,
     CompositionRevision,
-    MAX_PERSISTED_INTEGER,
     MissingBindingError,
     ModelSettings,
     ResourceDefinition,
@@ -325,7 +325,13 @@ class SQLiteStore:
                 connection.execute(
                     """INSERT INTO catalog_definitions
                        (id, kind, name, summary, created_at) VALUES (?, ?, ?, ?, ?)""",
-                    (definition.id, definition.kind.value, definition.name, definition.summary, now),
+                    (
+                        definition.id,
+                        definition.kind.value,
+                        definition.name,
+                        definition.summary,
+                        now,
+                    ),
                 )
             else:
                 connection.execute(
@@ -448,7 +454,9 @@ class SQLiteStore:
                 summary=row["summary"],
             )
         except ValidationError as exc:
-            raise PersistenceIntegrityError("Persisted catalog definition data is invalid.") from exc
+            raise PersistenceIntegrityError(
+                "Persisted catalog definition data is invalid."
+            ) from exc
 
     def save_composition(
         self,
@@ -505,7 +513,8 @@ class SQLiteStore:
                     if row is None:
                         raise MissingBindingError(
                             f"Catalog version {resource_id}@{version} does not exist. "
-                            "Choose an available version explicitly; no newer version was substituted."
+                            "Choose an available version explicitly; "
+                            "no newer version was substituted."
                         )
                     resolved.append(
                         CompositionBinding(
@@ -732,7 +741,9 @@ class SQLiteStore:
                 for item in binding_rows
             )
         except ValidationError as exc:
-            raise PersistenceIntegrityError("Persisted composition binding data is invalid.") from exc
+            raise PersistenceIntegrityError(
+                "Persisted composition binding data is invalid."
+            ) from exc
         model_rows = connection.execute(
             """SELECT slot, provider, model, parameters_json FROM composition_models
                WHERE composition_id = ? AND revision = ? ORDER BY slot""",
@@ -785,4 +796,6 @@ class SQLiteStore:
                 model_settings=model_settings,
             )
         except ValidationError as exc:
-            raise PersistenceIntegrityError("Persisted composition revision data is invalid.") from exc
+            raise PersistenceIntegrityError(
+                "Persisted composition revision data is invalid."
+            ) from exc

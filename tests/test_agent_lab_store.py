@@ -411,10 +411,13 @@ def test_failed_fresh_schema_creation_rolls_back_objects_and_version(tmp_path, m
 
     with sqlite3.connect(database) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 0
-        assert connection.execute(
-            """SELECT name FROM sqlite_master
+        assert (
+            connection.execute(
+                """SELECT name FROM sqlite_master
                WHERE type IN ('table', 'view', 'trigger') AND name NOT GLOB 'sqlite_*'"""
-        ).fetchall() == []
+            ).fetchall()
+            == []
+        )
 
 
 def test_revision_lookup_rejects_integers_outside_sqlite_range(tmp_path) -> None:

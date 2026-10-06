@@ -238,9 +238,7 @@ def test_api_enforces_prompt_targets_and_global_binding_order(tmp_path) -> None:
         "/api/compositions",
         body={
             "name": "Targeted skill",
-            "bindings": [
-                binding("skill/review-checklist", "1.0.0", target="planner")
-            ],
+            "bindings": [binding("skill/review-checklist", "1.0.0", target="planner")],
         },
     )
     assert status == 422
@@ -275,9 +273,7 @@ def test_api_rejects_persisted_integers_outside_sqlite_range(tmp_path) -> None:
         "/api/compositions",
         body={
             "name": "Oversized ordinal",
-            "bindings": [
-                binding("prompt/clarify-task", "1.0.0", ordinal=too_large)
-            ],
+            "bindings": [binding("prompt/clarify-task", "1.0.0", ordinal=too_large)],
         },
     )
     assert status == 422
@@ -332,9 +328,7 @@ def test_api_returns_safe_errors_for_invalid_persisted_data(tmp_path) -> None:
         body={
             "name": "Stored",
             "bindings": [binding("prompt/clarify-task", "1.0.0")],
-            "model_settings": [
-                {"slot": "main", "provider": "provider-a", "model": "model-a"}
-            ],
+            "model_settings": [{"slot": "main", "provider": "provider-a", "model": "model-a"}],
         },
     )
     assert status == 201
@@ -359,9 +353,7 @@ def test_api_returns_safe_errors_for_invalid_persisted_data(tmp_path) -> None:
     }
     assert "stored-catalog-secret" not in json.dumps(catalog_error)
 
-    status, _, composition_error = request(
-        api, "GET", f"/api/compositions/{created['id']}"
-    )
+    status, _, composition_error = request(api, "GET", f"/api/compositions/{created['id']}")
     assert status == 500
     assert composition_error == catalog_error
     assert "stored-model-secret" not in json.dumps(composition_error)

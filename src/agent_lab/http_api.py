@@ -12,9 +12,9 @@ from urllib.parse import parse_qs, urlsplit
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agent_lab.domain import (
+    MAX_PERSISTED_INTEGER,
     BindingOrdinal,
     CompositionNotFoundError,
-    MAX_PERSISTED_INTEGER,
     MissingBindingError,
     ModelSettings,
     ResourceId,
