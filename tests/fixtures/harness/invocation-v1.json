@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "invocation_id": "fixture-run-1",
+  "input_id": "fixture-input-v1",
+  "configuration_id": "fixture-configuration-v1",
+  "input_text": "hello",
+  "agents": [
+    {
+      "name": "one",
+      "instructions": "Respond to the input",
+      "binding": {"provider": "offline", "model": "a", "revision": "1"},
+      "tools": ["uppercase"],
+      "required_capabilities": ["tool_calls"]
+    }
+  ],
+  "bounds": {"steps": 8, "seconds": 5, "stop_grace_seconds": 0.1},
+  "prices": [
+    {
+      "currency": "USD",
+      "input_per_unit": "2",
+      "output_per_unit": "6",
+      "tokens_per_unit": 1000000,
+      "source": "supplied fixture",
+      "effective_date": "2026-10-10",
+      "binding": {"provider": "offline", "model": "a", "revision": "1"}
+    }
+  ]
+}

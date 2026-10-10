@@ -4,10 +4,12 @@
 
 ## Offline baseline
 
-Use Python 3.12+ and the committed `uv.lock`:
+Use Python 3.12+ and the committed `uv.lock`. The full source gate includes the
+optional harness extra; omit it only for baseline-only installs:
+
 
 ```sh
-uv sync --locked --group dev
+uv sync --locked --extra harness --group dev
 uv run pytest -m 'not live'
 uv run ruff check .
 uv run ruff format --check .
@@ -18,6 +20,24 @@ uv run agent-orchestrator --version
 ```
 
 The default CLI reports that run commands and the UI are unavailable. Its old milestone wording is an implementation cleanup item, not a current roadmap. The offline suite uses local fixtures, fake workers, and local process-owner probes; it makes no live provider calls.
+
+## Separate offline harness
+
+The optional `harness` extra adds the pinned Deep Agents/LangGraph stack without
+changing the legacy or creation runtime. Install it explicitly for its integration
+gate; an extra-free integration skip is not proof. See [harness architecture and
+limits](OFFLINE_HARNESS.md).
+
+```sh
+uv sync --locked --extra harness --group dev
+uv run --locked --extra harness pytest -q tests/test_harness_records.py tests/test_harness_offline.py
+uv run --locked --extra harness python -m agent_harness.demo
+uv run --locked --extra harness mypy src
+uv lock --check
+```
+
+Use the existing offline baseline too when checking shared dependency compatibility.
+No new website/composition tests are part of this foundation.
 
 ## Agent Lab backend
 
