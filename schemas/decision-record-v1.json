@@ -1,0 +1,1081 @@
+{
+  "$defs": {
+    "CalibrationIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "content_hash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "revision": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Revision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "revision",
+        "content_hash"
+      ],
+      "title": "CalibrationIdentity",
+      "type": "object"
+    },
+    "DecisionAcceptancePolicy": {
+      "additionalProperties": false,
+      "description": "Deterministic rules for consuming a normalized decision result.",
+      "properties": {
+        "fallback_outcome_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback Outcome Id"
+        },
+        "minimum_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Minimum Score"
+        },
+        "mode": {
+          "enum": [
+            "typed_outcome",
+            "score_threshold"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "on_abstention": {
+          "default": "attention_required",
+          "enum": [
+            "fallback",
+            "attention_required"
+          ],
+          "title": "On Abstention",
+          "type": "string"
+        },
+        "on_engine_failure": {
+          "default": "attention_required",
+          "enum": [
+            "fallback",
+            "attention_required"
+          ],
+          "title": "On Engine Failure",
+          "type": "string"
+        },
+        "policy_id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Policy Id",
+          "type": "string"
+        },
+        "required_calibration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CalibrationIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "required_score_scale": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Required Score Scale"
+        },
+        "required_score_semantics": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Required Score Semantics"
+        },
+        "revision": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Revision",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "understood_score_semantics": {
+          "default": [],
+          "items": {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Understood Score Semantics",
+          "type": "array"
+        }
+      },
+      "required": [
+        "policy_id",
+        "revision",
+        "mode"
+      ],
+      "title": "DecisionAcceptancePolicy",
+      "type": "object"
+    },
+    "DecisionDisposition": {
+      "additionalProperties": false,
+      "properties": {
+        "action_reference": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action Reference"
+        },
+        "decision_id": {
+          "format": "uuid",
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "evaluated_at": {
+          "format": "date-time",
+          "title": "Evaluated At",
+          "type": "string"
+        },
+        "policy_action": {
+          "$ref": "#/$defs/DecisionPolicyAction"
+        },
+        "policy_id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Policy Id",
+          "type": "string"
+        },
+        "policy_revision": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Policy Revision",
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/$defs/DecisionDispositionReason"
+        },
+        "request_hash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Request Hash",
+          "type": "string"
+        },
+        "result_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Result Hash"
+        },
+        "resulting_run_revision": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resulting Run Revision"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "score_semantics_used": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Score Semantics Used"
+        },
+        "selected_outcome_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selected Outcome Id"
+        },
+        "status": {
+          "$ref": "#/$defs/DecisionDispositionStatus"
+        },
+        "threshold_used": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Threshold Used"
+        }
+      },
+      "required": [
+        "decision_id",
+        "request_hash",
+        "status",
+        "policy_action",
+        "reason",
+        "policy_id",
+        "policy_revision",
+        "evaluated_at"
+      ],
+      "title": "DecisionDisposition",
+      "type": "object"
+    },
+    "DecisionDispositionReason": {
+      "enum": [
+        "accepted_typed_outcome",
+        "accepted_scored_outcome",
+        "explicit_abstention",
+        "score_below_threshold",
+        "stale_run_revision",
+        "stale_evidence",
+        "disallowed_outcome",
+        "malformed_result",
+        "incompatible_result",
+        "unsupported_score_semantics",
+        "score_mapping_mismatch",
+        "invalid_score_vector",
+        "calibration_mismatch",
+        "inference_identity_mismatch",
+        "engine_failure",
+        "missing_evidence",
+        "outcome_no_longer_allowed"
+      ],
+      "title": "DecisionDispositionReason",
+      "type": "string"
+    },
+    "DecisionDispositionStatus": {
+      "enum": [
+        "accepted",
+        "abstained",
+        "rejected",
+        "fallback",
+        "attention_required"
+      ],
+      "title": "DecisionDispositionStatus",
+      "type": "string"
+    },
+    "DecisionEngineFailure": {
+      "additionalProperties": false,
+      "properties": {
+        "classification": {
+          "$ref": "#/$defs/DecisionFailureClass"
+        },
+        "decision_id": {
+          "format": "uuid",
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "detail": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "retryable": {
+          "default": false,
+          "title": "Retryable",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "decision_id",
+        "classification",
+        "detail"
+      ],
+      "title": "DecisionEngineFailure",
+      "type": "object"
+    },
+    "DecisionEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "content_hash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "current_run_revision": {
+          "minimum": 0,
+          "title": "Current Run Revision",
+          "type": "integer"
+        },
+        "inclusion_reason": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Inclusion Reason",
+          "type": "string"
+        },
+        "order": {
+          "minimum": 0,
+          "title": "Order",
+          "type": "integer"
+        },
+        "source_ref": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Source Ref",
+          "type": "string"
+        },
+        "source_revision": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Source Revision",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "maxLength": 16384,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "required": [
+        "source_ref",
+        "source_revision",
+        "content_hash",
+        "inclusion_reason",
+        "order",
+        "current_run_revision"
+      ],
+      "title": "DecisionEvidence",
+      "type": "object"
+    },
+    "DecisionFailureClass": {
+      "enum": [
+        "engine_unavailable",
+        "engine_error",
+        "engine_timeout",
+        "missing_evidence",
+        "malformed_result",
+        "incompatible_result"
+      ],
+      "title": "DecisionFailureClass",
+      "type": "string"
+    },
+    "DecisionInferenceBinding": {
+      "additionalProperties": false,
+      "description": "Frozen identity for one inference mechanism, without provider SDK objects.",
+      "properties": {
+        "adapter_id": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Adapter Id"
+        },
+        "adapter_revision": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Adapter Revision"
+        },
+        "base_model_id": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base Model Id"
+        },
+        "base_model_revision": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base Model Revision"
+        },
+        "calibration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CalibrationIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "decision_model_id": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decision Model Id"
+        },
+        "decision_model_revision": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decision Model Revision"
+        },
+        "deterministic_policy_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Deterministic Policy Id"
+        },
+        "deterministic_policy_revision": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Deterministic Policy Revision"
+        },
+        "deterministic_rule": {
+          "anyOf": [
+            {
+              "const": "first_allowed",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Deterministic Rule"
+        },
+        "inference_state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InferenceStateIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "mechanism": {
+          "$ref": "#/$defs/DecisionMechanism"
+        },
+        "readout_id": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Readout Id"
+        },
+        "readout_revision": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Readout Revision"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "mechanism"
+      ],
+      "title": "DecisionInferenceBinding",
+      "type": "object"
+    },
+    "DecisionMechanism": {
+      "enum": [
+        "deterministic_policy",
+        "native_decision_model",
+        "general_llm_readout",
+        "generative_structured_output"
+      ],
+      "title": "DecisionMechanism",
+      "type": "string"
+    },
+    "DecisionOption": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "outcome_id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Outcome Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome_id",
+        "label"
+      ],
+      "title": "DecisionOption",
+      "type": "object"
+    },
+    "DecisionPolicyAction": {
+      "enum": [
+        "continue",
+        "fallback",
+        "attention_required"
+      ],
+      "title": "DecisionPolicyAction",
+      "type": "string"
+    },
+    "DecisionRequest": {
+      "additionalProperties": false,
+      "description": "One immutable question, evidence selection, outcome set, and effective policy.",
+      "properties": {
+        "acceptance_policy": {
+          "$ref": "#/$defs/DecisionAcceptancePolicy"
+        },
+        "allowed_outcomes": {
+          "items": {
+            "$ref": "#/$defs/DecisionOption"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "title": "Allowed Outcomes",
+          "type": "array"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "current_run_revision": {
+          "minimum": 0,
+          "title": "Current Run Revision",
+          "type": "integer"
+        },
+        "decision_id": {
+          "format": "uuid",
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "evidence": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DecisionEvidence"
+          },
+          "maxItems": 16,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "inference_binding": {
+          "$ref": "#/$defs/DecisionInferenceBinding"
+        },
+        "missing_evidence_refs": {
+          "default": [],
+          "items": {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 16,
+          "title": "Missing Evidence Refs",
+          "type": "array"
+        },
+        "parent_decision_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Decision Id"
+        },
+        "question": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        },
+        "question_id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Question Id",
+          "type": "string"
+        },
+        "question_revision": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Question Revision",
+          "type": "string"
+        },
+        "required_evidence_refs": {
+          "default": [],
+          "items": {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 16,
+          "title": "Required Evidence Refs",
+          "type": "array"
+        },
+        "run_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "decision_id",
+        "run_id",
+        "current_run_revision",
+        "question_id",
+        "question_revision",
+        "question",
+        "allowed_outcomes",
+        "inference_binding",
+        "acceptance_policy",
+        "created_at"
+      ],
+      "title": "DecisionRequest",
+      "type": "object"
+    },
+    "DecisionResult": {
+      "additionalProperties": false,
+      "properties": {
+        "abstained": {
+          "default": false,
+          "title": "Abstained",
+          "type": "boolean"
+        },
+        "abstention_reason": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Abstention Reason"
+        },
+        "adapter_result_id": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Adapter Result Id"
+        },
+        "consumed_evidence_digest": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Consumed Evidence Digest",
+          "type": "string"
+        },
+        "consumed_run_revision": {
+          "minimum": 0,
+          "title": "Consumed Run Revision",
+          "type": "integer"
+        },
+        "decision_id": {
+          "format": "uuid",
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "effective_inference": {
+          "$ref": "#/$defs/DecisionInferenceBinding"
+        },
+        "outcome_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outcome Id"
+        },
+        "result_class": {
+          "$ref": "#/$defs/DecisionResultClass",
+          "default": "valid"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "scores": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DecisionScoreVector"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "decision_id",
+        "effective_inference",
+        "consumed_run_revision",
+        "consumed_evidence_digest"
+      ],
+      "title": "DecisionResult",
+      "type": "object"
+    },
+    "DecisionResultClass": {
+      "enum": [
+        "valid",
+        "malformed",
+        "incompatible"
+      ],
+      "title": "DecisionResultClass",
+      "type": "string"
+    },
+    "DecisionScoreEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "outcome_id": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Outcome Id",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        }
+      },
+      "required": [
+        "outcome_id",
+        "value"
+      ],
+      "title": "DecisionScoreEntry",
+      "type": "object"
+    },
+    "DecisionScoreVector": {
+      "additionalProperties": false,
+      "properties": {
+        "scale_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Scale Id",
+          "type": "string"
+        },
+        "semantics_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Semantics Id",
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "$ref": "#/$defs/DecisionScoreEntry"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "title": "Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "semantics_id",
+        "scale_id",
+        "values"
+      ],
+      "title": "DecisionScoreVector",
+      "type": "object"
+    },
+    "InferenceStateIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "content_hash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "revision": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Revision",
+          "type": "string"
+        },
+        "state_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "State Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state_id",
+        "revision",
+        "content_hash"
+      ],
+      "title": "InferenceStateIdentity",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Durable request and write-once normalized reply/disposition for a decision.",
+  "properties": {
+    "completed_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Completed At"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "disposition": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DecisionDisposition"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "failure": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DecisionEngineFailure"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request": {
+      "$ref": "#/$defs/DecisionRequest"
+    },
+    "request_hash": {
+      "title": "Request Hash",
+      "type": "string"
+    },
+    "request_persisted_revision": {
+      "minimum": 1,
+      "title": "Request Persisted Revision",
+      "type": "integer"
+    },
+    "result": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DecisionResult"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "request",
+    "request_hash",
+    "request_persisted_revision",
+    "created_at"
+  ],
+  "title": "DecisionRecord",
+  "type": "object"
+}

@@ -1,0 +1,98 @@
+{
+  "task": "AGO-69 / c11bf1e4",
+  "source": "/Users/yanqinwang/Library/Application Support/firstmate-3000/overflow/pasted-text-00af910f.txt",
+  "source_authority": "Captain supplied full-text pointer; corrected dispatch excerpt explicitly excluded",
+  "filename": "DEFAULT-EVIDENCE.html",
+  "bytes": 4551392,
+  "sha256": "dcea2bbb71fec9ec1a1726b40f4feb6cb5f989a7f0f4433d31f27c0791f6793a",
+  "preserved_at": "2026-10-13T10:59:37.445907+08:00",
+  "preservation": "Exact read_bytes/write_bytes copy; fsync then byte equality and SHA-256 checks. No HTML parsing/reserialization of retained original. Archive is in retained card-bodies, outside disposable worktrees and timed-cleanup evidence.",
+  "heading": "All eight default-state captures",
+  "embedded_pngs": [
+    {
+      "ordinal": 1,
+      "name": "full-required-desktop",
+      "original_alt": "Full · required skills desktop default state",
+      "bytes": 515378,
+      "width": 1440,
+      "height": 900,
+      "sha256": "6607f9c56bc75cac2df87d83793b3f98dcf5695bf28095f8deffd50ed73c8a72",
+      "matches_attachment_declared_hash": true
+    },
+    {
+      "ordinal": 2,
+      "name": "full-control-desktop",
+      "original_alt": "Full · control desktop default state",
+      "bytes": 806111,
+      "width": 1440,
+      "height": 900,
+      "sha256": "1992e7caec4d0589aaa56d38ab0b538247b9477ce18078dd6c58de42c2267c95",
+      "matches_attachment_declared_hash": true
+    },
+    {
+      "ordinal": 3,
+      "name": "minimal-required-desktop",
+      "original_alt": "Minimal · required skills desktop default state",
+      "bytes": 537384,
+      "width": 1440,
+      "height": 900,
+      "sha256": "9574264a91d33ec10a5af2b7b9b7691c70de025de353fa1b086ed447efc8e9ea",
+      "matches_attachment_declared_hash": true
+    },
+    {
+      "ordinal": 4,
+      "name": "minimal-control-desktop",
+      "original_alt": "Minimal · control desktop default state",
+      "bytes": 707765,
+      "width": 1440,
+      "height": 900,
+      "sha256": "a1f7ad9b61ea75e41e296b047bc74e1c2a38ed8f48feb98d1f44022dc651b4ff",
+      "matches_attachment_declared_hash": true
+    },
+    {
+      "ordinal": 5,
+      "name": "full-required-narrow",
+      "original_alt": "Full · required skills narrow default state",
+      "bytes": 228910,
+      "width": 390,
+      "height": 844,
+      "sha256": "1dc619eb062b8eac174d66b0ae128bbc0a3db44cd5684db62588977ecddc5928",
+      "matches_attachment_declared_hash": true
+    },
+    {
+      "ordinal": 6,
+      "name": "full-control-narrow",
+      "original_alt": "Full · control narrow default state",
+      "bytes": 217705,
+      "width": 390,
+      "height": 844,
+      "sha256": "7a0c2a183790f84fa11dbf79ba054ecb7691fd12d4ed74b56bfc3f6f18d219b0",
+      "matches_attachment_declared_hash": true
+    },
+    {
+      "ordinal": 7,
+      "name": "minimal-required-narrow",
+      "original_alt": "Minimal · required skills narrow default state",
+      "bytes": 166379,
+      "width": 390,
+      "height": 844,
+      "sha256": "217688e2b7a5edcbb060e0580ed8f70229cd424d198d5d2b3493e853f6b403b3",
+      "matches_attachment_declared_hash": true
+    },
+    {
+      "ordinal": 8,
+      "name": "minimal-control-narrow",
+      "original_alt": "Minimal · control narrow default state",
+      "bytes": 229034,
+      "width": 390,
+      "height": 844,
+      "sha256": "17b3c8d5f60099425f05d48e3ef97d916241ae86ece5037e78b2838b2a58641c",
+      "matches_attachment_declared_hash": true
+    }
+  ],
+  "linked_files_not_embedded": [
+    "REVIEW.html"
+  ],
+  "scope": "Eight invitation default viewport captures from four labelled runs, not complete-page outputs, run logs or proof of skill isolation. Frozen-HTML hashes are claims within the original, not verification of absent source pages.",
+  "captain_conclusion_verbatim": "alright. i am done with the runs. honestly, i do not see any noticeable difference between skill or no skill, at least with instructions. so i will actually freeze this result and keep it available as a sample in the website."
+}

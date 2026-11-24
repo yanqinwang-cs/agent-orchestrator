@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "decision_id": "11111111-1111-4111-8111-111111111111",
+  "effective_inference": {
+    "schema_version": 1,
+    "mechanism": "general_llm_readout",
+    "base_model_id": "fixture-general-model",
+    "base_model_revision": "2026-09",
+    "readout_id": "specialist-readout",
+    "readout_revision": "5",
+    "calibration": {
+      "artifact_id": "reviewer-calibration",
+      "revision": "3",
+      "content_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  },
+  "consumed_run_revision": 4,
+  "consumed_evidence_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "outcome_id": "implementer",
+  "adapter_result_id": "readout-fixture-1"
+}

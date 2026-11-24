@@ -2,17 +2,35 @@ import hashlib
 import sqlite3
 from datetime import UTC, datetime
 from io import BytesIO
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
 
 from orchestrator.artifacts import ArtifactPathError, ArtifactStore
-from orchestrator.domain.backend import ArtifactEntry, OutputStatus, WorkerResult
+from orchestrator.backends.codex_output import retain_read_only_report
+from orchestrator.domain.backend import (
+    ArtifactEntry,
+    BackendPreflightSnapshot,
+    OutputStatus,
+    PreflightFact,
+    WorkerResult,
+)
+from orchestrator.domain.decisions import (
+    DecisionAcceptancePolicy,
+    DecisionDispositionStatus,
+    DecisionOption,
+    DecisionRequest,
+    DecisionResult,
+    decision_request_hash,
+    evaluate_decision,
+)
 from orchestrator.domain.models import (
     AgentRunSpec,
     AttemptState,
     AttemptStatus,
+    BackendPreflightRecordedEvent,
     Effort,
+    EventKind,
     Handoff,
     InterventionRequestedEvent,
     ModelBindingSettings,
@@ -28,11 +46,15 @@ from orchestrator.persistence.ledger import (
     ImmutableSpecificationConflict,
     LedgerInvariantError,
     ReservationConflict,
+    canonical_json,
+    content_hash,
 )
 from orchestrator.persistence.models import (
     ArtifactPublication,
     AttemptRegistration,
     AttemptResultRegistration,
+    BackendPreflightRecord,
+    DecisionRecord,
     LedgerMutation,
     OutboxIntent,
     OutboxStatus,
@@ -97,10 +119,10 @@ def test_database_is_versioned_and_survives_reopen(tmp_path) -> None:
     path = tmp_path / "orchestrator.sqlite3"
 
     with SQLiteLedger(path) as ledger:
-        assert ledger.schema_version == 3
+        assert ledger.schema_version == 5
 
     with SQLiteLedger(path) as reopened:
-        assert reopened.schema_version == 3
+        assert reopened.schema_version == 5
 
 
 def test_database_rejects_a_schema_newer_than_this_application(tmp_path) -> None:
@@ -112,21 +134,82 @@ def test_database_rejects_a_schema_newer_than_this_application(tmp_path) -> None
         SQLiteLedger(path)
 
 
-def test_v1_database_receives_additive_result_and_control_migrations(tmp_path) -> None:
+@pytest.mark.parametrize("old_version", [1, 2, 3, 4])
+def test_old_database_migrates_without_rewriting_snapshots(
+    tmp_path, app_config, old_version
+) -> None:
     from orchestrator.persistence.migrations import MIGRATIONS
 
     path = tmp_path / "legacy.sqlite3"
+    project, spec = _run_inputs(app_config)
+    legacy = spec.model_dump(mode="json", exclude={"snapshot_hash"})
+    legacy["workflow"]["policy"].pop("decision_questions")
+    legacy_hash = content_hash(canonical_json(legacy))
+    legacy["snapshot_hash"] = legacy_hash
+    legacy_payload = canonical_json(legacy)
     with sqlite3.connect(path) as connection:
-        MIGRATIONS[0][2](connection)
+        for version, name, migration in MIGRATIONS[:old_version]:
+            migration(connection)
+            connection.execute(
+                "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
+                (version, name, STAMP.isoformat()),
+            )
+        connection.execute(f"PRAGMA user_version = {old_version}")
         connection.execute(
-            "INSERT INTO schema_migrations(version, name, applied_at) VALUES (1, ?, ?)",
-            (MIGRATIONS[0][1], STAMP.isoformat()),
+            "INSERT INTO projects VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                project.id,
+                project.name,
+                project.path,
+                project.settings_revision,
+                STAMP.isoformat(),
+                STAMP.isoformat(),
+            ),
         )
-        connection.execute("PRAGMA user_version = 1")
+        payload = canonical_json(project)
+        connection.execute(
+            "INSERT INTO project_configs VALUES (?, ?, 1, ?, ?, ?)",
+            (
+                project.id,
+                project.settings_revision,
+                payload,
+                content_hash(payload),
+                STAMP.isoformat(),
+            ),
+        )
+        connection.execute(
+            "INSERT INTO run_specs VALUES (?, 1, ?, ?)",
+            (legacy_hash, legacy_payload, STAMP.isoformat()),
+        )
+        connection.execute(
+            "INSERT INTO runs(run_id, project_id, settings_revision, snapshot_hash, status, "
+            "revision, active_stages, attempts_used, elapsed_seconds, created_at, updated_at) "
+            "VALUES ('legacy', ?, ?, ?, 'ready', 0, '[]', 0, 0, ?, ?)",
+            (
+                project.id,
+                project.settings_revision,
+                legacy_hash,
+                STAMP.isoformat(),
+                STAMP.isoformat(),
+            ),
+        )
+        for stage in spec.workflow.stages:
+            connection.execute(
+                "INSERT INTO stages(run_id, stage_id, definition, status, updated_at) "
+                "VALUES ('legacy', ?, ?, 'pending', ?)",
+                (stage.id, canonical_json(stage), STAMP.isoformat()),
+            )
 
     with SQLiteLedger(path) as ledger:
-        assert ledger.schema_version == 3
+        assert ledger.schema_version == 5
+        restored = ledger.get_run("legacy")
+        assert restored.spec.snapshot_hash == legacy_hash
+        assert restored.spec.workflow.policy.decision_questions == ()
+        assert restored.spec.task == spec.task
+        assert ledger.list_decision_records("legacy") == ()
     with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT payload FROM run_specs").fetchone()[0] == legacy_payload
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
         columns = {row[1] for row in connection.execute("PRAGMA table_info(stages)").fetchall()}
         assert "result_payload" in columns
         assert (
@@ -135,19 +218,305 @@ def test_v1_database_receives_additive_result_and_control_migrations(tmp_path) -
             ).fetchone()
             is not None
         )
-        assert {
-            "attention_reason",
-            "resume_status",
-        } <= {row[1] for row in connection.execute("PRAGMA table_info(runs)").fetchall()}
+        assert {"attention_reason", "resume_status"} <= {
+            row[1] for row in connection.execute("PRAGMA table_info(runs)").fetchall()
+        }
         assert {
             "intervention_records",
             "stage_redirects",
+            "decision_records",
         } <= {
             row[0]
             for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
         }
+
+
+def test_backend_preflight_record_and_event_are_immutable_and_survive_reopen(
+    tmp_path, app_config
+) -> None:
+    path = tmp_path / "preflight.sqlite3"
+    with SQLiteLedger(path) as ledger:
+        _, run_spec = _create_run(ledger, app_config)
+        spec = _attempt_spec("run-1", run_spec.snapshot_hash)
+        ledger.apply(
+            LedgerMutation(
+                command_id=uuid4(),
+                run_id="run-1",
+                expected_revision=0,
+                actor="test",
+                occurred_at=STAMP,
+                attempt_creations=(
+                    AttemptRegistration(
+                        spec=spec,
+                        stage_id="review",
+                        slot_id="review/slot-01",
+                        state=AttemptState(attempt_id="attempt-1", status=AttemptStatus.LAUNCHING),
+                    ),
+                ),
+            )
+        )
+        snapshot = BackendPreflightSnapshot(
+            preparation_id="prep-1",
+            observed_at=STAMP,
+            runtime=(PreflightFact(key="runtime_version", value="0.159.2", state="verified"),),
+        )
+        record_data = {
+            "record_id": "preflight-1",
+            "run_id": "run-1",
+            "attempt_id": "attempt-1",
+            "preparation_id": "prep-1",
+            "attempt_spec_hash": content_hash(canonical_json(spec)),
+            "accepted": True,
+            "occurred_at": STAMP,
+            "snapshot": snapshot,
+        }
+        record = BackendPreflightRecord(**record_data, record_hash="0" * 64)
+        record_hash = content_hash(
+            canonical_json(record.model_dump(mode="json", exclude={"record_hash"}))
+        )
+        record = record.model_copy(update={"record_hash": record_hash})
+        event = BackendPreflightRecordedEvent(
+            event_id=uuid4(),
+            run_id="run-1",
+            occurred_at=STAMP,
+            actor="test",
+            kind=EventKind.BACKEND_PREFLIGHT_RECORDED,
+            record_id=record.record_id,
+            attempt_id=record.attempt_id,
+            preparation_id=record.preparation_id,
+            record_hash=record.record_hash,
+            accepted=True,
+        )
+        current = ledger.get_attempt("attempt-1")
+        ledger.apply(
+            LedgerMutation(
+                command_id=uuid4(),
+                run_id="run-1",
+                expected_revision=1,
+                actor="test",
+                occurred_at=STAMP,
+                attempt_updates=(
+                    current.state.model_copy(
+                        update={
+                            "backend_preflight_record_id": record.record_id,
+                            "backend_preflight_record_hash": record.record_hash,
+                        }
+                    ),
+                ),
+                backend_preflight_records=(record,),
+                events=(event,),
+            )
+        )
+        assert ledger.get_backend_preflight_record(record.record_id) == record
+        assert ledger.list_backend_preflight_records("run-1") == (record,)
+        assert ledger.get_attempt("attempt-1").state.backend_preflight_record_hash == record_hash
+        assert any(
+            item.kind == EventKind.BACKEND_PREFLIGHT_RECORDED
+            for item in ledger.list_events("run-1")
+        )
+
+    with SQLiteLedger(path) as reopened:
+        assert reopened.get_backend_preflight_record("preflight-1") == record
+        assert reopened.list_backend_preflight_records("run-1") == (record,)
+        current = reopened.get_attempt("attempt-1")
+        with pytest.raises(LedgerInvariantError, match="link is immutable"):
+            reopened.apply(
+                LedgerMutation(
+                    command_id=uuid4(),
+                    run_id="run-1",
+                    expected_revision=2,
+                    actor="test",
+                    occurred_at=STAMP,
+                    attempt_updates=(
+                        current.state.model_copy(
+                            update={
+                                "backend_preflight_record_id": "another-record",
+                                "backend_preflight_record_hash": "1" * 64,
+                            }
+                        ),
+                    ),
+                )
+            )
+        with sqlite3.connect(path) as connection:
+            with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+                connection.execute(
+                    "DELETE FROM backend_preflight_records WHERE record_id = ?",
+                    (record.record_id,),
+                )
+
+
+def test_codex_read_only_report_is_bounded_and_retained_from_exact_bytes(
+    tmp_path, app_config, repo_root
+) -> None:
+    with SQLiteLedger(tmp_path / "codex-output.sqlite3") as ledger:
+        _, run_spec = _create_run(ledger, app_config)
+        spec = _attempt_spec("run-1", run_spec.snapshot_hash)
+        ledger.apply(
+            LedgerMutation(
+                command_id=uuid4(),
+                run_id="run-1",
+                expected_revision=0,
+                actor="test",
+                occurred_at=STAMP,
+                attempt_creations=(
+                    AttemptRegistration(
+                        spec=spec,
+                        stage_id="review",
+                        slot_id="review/slot-01",
+                        state=AttemptState(attempt_id="attempt-1", status=AttemptStatus.RUNNING),
+                    ),
+                ),
+            )
+        )
+        raw = (repo_root / "tests/fixtures/backends/codex-read-only-result-v1.json").read_bytes()
+        store = ArtifactStore(tmp_path / "artifacts", ledger)
+        result = retain_read_only_report(raw, spec, ledger, store, observed_at=STAMP)
+        artifact_id = str(
+            uuid5(
+                NAMESPACE_URL,
+                f"codex-report:{spec.attempt_id}:{content_hash(raw)}",
+            )
+        )
+
+        assert result.status == OutputStatus.PASS
+        assert len(result.artifacts) == 1
+        assert result.artifacts[0].name == "report"
+        assert result.artifacts[0].schema_id == "codex-read-only-result-v1"
+        assert result.artifacts[0].content_hash == content_hash(raw)
+        assert store.read(artifact_id) == raw
+        malformed = b"{}"
+        malformed_id = str(
+            uuid5(
+                NAMESPACE_URL,
+                f"codex-report:{spec.attempt_id}:{content_hash(malformed)}",
+            )
+        )
+        with pytest.raises(ValueError, match="does not match"):
+            retain_read_only_report(malformed, spec, ledger, store, observed_at=STAMP)
+        assert store.read(malformed_id) == malformed
+        oversized_prefix = b" " * 65_536
+        oversized_id = str(
+            uuid5(
+                NAMESPACE_URL,
+                f"codex-report:{spec.attempt_id}:{content_hash(oversized_prefix)}",
+            )
+        )
+        with pytest.raises(ValueError, match="byte limit"):
+            retain_read_only_report(b" " * 65_537, spec, ledger, store, observed_at=STAMP)
+        assert store.read(oversized_id) == oversized_prefix
+
+
+@pytest.mark.parametrize(
+    "fixture_name",
+    [
+        "deterministic-policy",
+        "native-decision-model",
+        "general-llm-readout",
+        "generative-structured-output",
+    ],
+)
+def test_decision_request_and_disposition_survive_reopen_write_once(
+    tmp_path,
+    app_config,
+    repo_root,
+    fixture_name,
+) -> None:
+    fixture = DecisionResult.model_validate_json(
+        (repo_root / "tests" / "fixtures" / "decisions" / f"{fixture_name}.json").read_text()
+    )
+    path = tmp_path / "decisions.sqlite3"
+    with SQLiteLedger(path) as ledger:
+        _create_run(ledger, app_config)
+        request = DecisionRequest(
+            decision_id=uuid4(),
+            run_id="run-1",
+            current_run_revision=0,
+            question_id="implementer_choice",
+            question_revision="1",
+            question="Choose an approved specialist.",
+            allowed_outcomes=(
+                DecisionOption(outcome_id="prototype-implementer", label="Prototype implementer"),
+                DecisionOption(outcome_id="implementer", label="Implementer"),
+            ),
+            inference_binding=fixture.effective_inference,
+            acceptance_policy=DecisionAcceptancePolicy(
+                policy_id="typed_outcome",
+                revision="1",
+                mode="typed_outcome",
+                understood_score_semantics=("probability_distribution_v1",),
+                required_calibration=fixture.effective_inference.calibration,
+            ),
+            created_at=STAMP,
+        )
+        pending = DecisionRecord(
+            request=request,
+            request_hash=decision_request_hash(request),
+            request_persisted_revision=1,
+            created_at=STAMP,
+        )
+        ledger.apply(
+            LedgerMutation(
+                command_id=uuid4(),
+                run_id="run-1",
+                expected_revision=0,
+                actor="coordinator",
+                occurred_at=STAMP,
+                run_update=RunProjectionUpdate(),
+                decision_records=(pending,),
+            )
+        )
+        result = fixture.model_copy(
+            update={
+                "decision_id": request.decision_id,
+                "consumed_run_revision": request.current_run_revision,
+                "consumed_evidence_digest": request.evidence_digest,
+            }
+        )
+        disposition = evaluate_decision(
+            request,
+            result,
+            current_run_revision=0,
+            currently_allowed_outcomes={"prototype-implementer", "implementer"},
+            evaluated_at=STAMP,
+        ).model_copy(update={"resulting_run_revision": 2})
+        assert disposition.status == DecisionDispositionStatus.ACCEPTED
+        completed = pending.model_copy(
+            update={"result": result, "disposition": disposition, "completed_at": STAMP}
+        )
+        ledger.apply(
+            LedgerMutation(
+                command_id=uuid4(),
+                run_id="run-1",
+                expected_revision=1,
+                actor="coordinator",
+                occurred_at=STAMP,
+                run_update=RunProjectionUpdate(),
+                decision_records=(completed,),
+            )
+        )
+
+    with SQLiteLedger(path) as reopened:
+        record = reopened.get_decision_record(request.decision_id)
+        assert record.result == result
+        assert record.disposition == disposition
+        assert reopened.list_decision_records("run-1") == (record,)
+        changed = record.model_copy(
+            update={"disposition": disposition.model_copy(update={"policy_revision": "2"})}
+        )
+        with pytest.raises(LedgerInvariantError, match="write-once"):
+            reopened.apply(
+                LedgerMutation(
+                    command_id=uuid4(),
+                    run_id="run-1",
+                    expected_revision=2,
+                    actor="coordinator",
+                    occurred_at=STAMP,
+                    run_update=RunProjectionUpdate(),
+                    decision_records=(changed,),
+                )
+            )
 
 
 def test_normalized_attempt_results_and_stage_outputs_survive_reopen_immutably(

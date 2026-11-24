@@ -1,5 +1,180 @@
 {
   "$defs": {
+    "BackendPreflightSnapshot": {
+      "additionalProperties": false,
+      "description": "Effective preparation evidence; values must be sanitized before construction.",
+      "properties": {
+        "auth": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PreflightFact"
+          },
+          "title": "Auth",
+          "type": "array"
+        },
+        "binding": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PreflightFact"
+          },
+          "title": "Binding",
+          "type": "array"
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PreflightFact"
+          },
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "owner_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner Id"
+        },
+        "ownership": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PreflightFact"
+          },
+          "title": "Ownership",
+          "type": "array"
+        },
+        "permissions": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PreflightFact"
+          },
+          "title": "Permissions",
+          "type": "array"
+        },
+        "preparation_id": {
+          "minLength": 1,
+          "title": "Preparation Id",
+          "type": "string"
+        },
+        "provenance": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PreflightFact"
+          },
+          "title": "Provenance",
+          "type": "array"
+        },
+        "recovery": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PreflightFact"
+          },
+          "title": "Recovery",
+          "type": "array"
+        },
+        "runtime": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PreflightFact"
+          },
+          "title": "Runtime",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "preparation_id",
+        "observed_at"
+      ],
+      "title": "BackendPreflightSnapshot",
+      "type": "object"
+    },
+    "PreflightFact": {
+      "additionalProperties": false,
+      "description": "A sanitized, provider-neutral fact observed before worker execution.",
+      "properties": {
+        "evidence_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence Ref"
+        },
+        "key": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Key",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "state": {
+          "enum": [
+            "verified",
+            "unverified",
+            "unsupported",
+            "not_applicable"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "required": [
+        "key",
+        "state"
+      ],
+      "title": "PreflightFact",
+      "type": "object"
+    },
     "PreflightIssue": {
       "additionalProperties": false,
       "properties": {
@@ -33,6 +208,82 @@
       ],
       "title": "PreflightIssue",
       "type": "object"
+    },
+    "WorkerHandle": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_id": {
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "backend": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Backend",
+          "type": "string"
+        },
+        "backend_version": {
+          "minLength": 1,
+          "title": "Backend Version",
+          "type": "string"
+        },
+        "handle_id": {
+          "minLength": 1,
+          "title": "Handle Id",
+          "type": "string"
+        },
+        "lifecycle_owner_id": {
+          "minLength": 1,
+          "title": "Lifecycle Owner Id",
+          "type": "string"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session Id"
+        },
+        "thread_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Thread Id"
+        },
+        "turn_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Turn Id"
+        }
+      },
+      "required": [
+        "handle_id",
+        "backend",
+        "backend_version",
+        "attempt_id",
+        "lifecycle_owner_id"
+      ],
+      "title": "WorkerHandle",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -47,6 +298,28 @@
       },
       "title": "Issues",
       "type": "array"
+    },
+    "prepared_handle": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkerHandle"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "snapshot": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BackendPreflightSnapshot"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

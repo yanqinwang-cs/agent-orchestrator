@@ -1,0 +1,34 @@
+{
+  "id": "R03",
+  "label": "Roast-to-order coffee",
+  "pdf_page": 7,
+  "archive_member": "Visual-Reference-Library/assets/R03.png",
+  "original_basename": "codex-clipboard-758ad1cb-ca63-49da-afc5-f7bd96acf3e3.png",
+  "sha256": "0ba4a1159ce950fcde7ac94cdd8ad4434a9452a65e47586fba09badd14ac4027",
+  "bytes": 1711551,
+  "dimensions": [
+    2048,
+    1536
+  ],
+  "available_link": null,
+  "link_status_from_inventory": "Not supplied / not tested",
+  "purpose_from_inventory": "Communicate fresh roasting and guide shoppers to coffee products.",
+  "bounded_format_from_inventory": "Commerce homepage hero",
+  "family_from_inventory": "Product / commerce",
+  "project_relationship_from_inventory": "Standalone reference. Similar dark photography to R01 does not establish a shared site.",
+  "project_group_from_inventory": null,
+  "observed_evidence_from_inventory": "Coffee navigation, roasting image, review strip, product card, price and add action. Brand not legible.",
+  "visible_theme_description_from_inventory": "Dark photographic craft; olive accents; oversized sans; floating product card",
+  "inferred_style_tags_authored": [
+    "cinematic/image-led",
+    "bold/graphic"
+  ],
+  "style_tag_caveat": "Optional working labels; not verified source metadata or mandatory appearance. See SHARED-NOTES.md for local refinements.",
+  "allocation": [
+    "S02"
+  ],
+  "adaptation": "No adaptation recorded; supplied media retained unchanged.",
+  "rights": "Creators, licenses and reuse permission unknown. Local reference access is not redistribution permission.",
+  "inspection_limits": "PDF appearance and inventory reviewed; no live interactions, breakpoints, accessibility conformance or effectiveness established.",
+  "motion_inventory": null
+}

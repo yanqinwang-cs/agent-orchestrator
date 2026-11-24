@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -187,13 +186,4 @@ def validate_config_file(path: Path, root: Path | None = None) -> str:
         f"{source}: cannot identify an application configuration; "
         "expected agents, stages, backends, "
         "allowed_workflows, or presets"
-    )
-
-
-def export_model_schema(model_type: type[BaseModel], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    schema = model_type.model_json_schema()
-    path.write_text(
-        json.dumps(schema, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
     )

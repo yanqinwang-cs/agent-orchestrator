@@ -1,0 +1,23 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "label": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Label",
+      "type": "string"
+    },
+    "outcome_id": {
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "title": "Outcome Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "outcome_id",
+    "label"
+  ],
+  "title": "DecisionOption",
+  "type": "object"
+}

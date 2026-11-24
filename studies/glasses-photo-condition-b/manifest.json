@@ -1,0 +1,15 @@
+{
+  "README.md": "b41697b028ffa81723593fa70f67d074917a95281c32f828f8129f88416c8e8f",
+  "app.js": "19374d0aafe9a17646e60f4f9c88b40afbfb02adbfea4b48690a62cd128f3c8c",
+  "assets/detail.png": "731533bd3103bb2363703ae0842c4d683bd529e5a13b68b7941f248faf3354e4",
+  "assets/scene.jpg": "7deb5cafd1cf4aa088d41b9d4c4a6ccf94511cd4286b34bd9a44585e57360cc9",
+  "index.html": "b42edeb2051f6bb5e0a85890adc7efe97cb475ba811003b7ddc96aba7664c98d",
+  "inputs/R03-source-index.json": "a910f011451611026ad529fc7e8f41bac76b6943b0668eae07f79edbb875708d",
+  "inputs/S02-R03-photo-v0.1.md": "649db871dc0b79fbc420d43fa9aa8570eaf5c598bb305da638225a5795d872ee",
+  "inputs/S02-product-presentation.md": "72425dd548a9514b1fa61ffb4cf088e79e63cc9872dd6e6095e1c4267c0dce5c",
+  "inputs/SHARED-NOTES.md": "7ebe6a33431eaef5b97e5dbb2aa22c1d046e286aef9cb11b385009d6b850ad6e",
+  "inputs/photographic-provenance.json": "634ae033ce40d9c8b91c5813d48c10eb81ff35c7cc863cc688a86eaca256445f",
+  "inputs/product-prompt.md": "9485092f2014360a581822b06e161b3b07b60a0b50f546d93adab6ba05d16044",
+  "style.css": "732bfab4e828c7aa9ded6e29c9b6067d2ab9c8fb64c74fd3230e9ad22c116997",
+  "verify.mjs": "6cd9310bc958169843c9c485573536ada235a230fe9480ab1d4e3a01e2e85f43"
+}

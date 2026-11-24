@@ -1,0 +1,79 @@
+:root { --ink:#040404; --linen:#C9BC9C; --copper:#C7722C; --honey:#DCB278; color:var(--linen); background:var(--ink); font-family:Arial,Helvetica,sans-serif; }
+* { box-sizing:border-box; }
+body { margin:0; }
+a { color:inherit; text-underline-offset:4px; }
+button { font:inherit; cursor:pointer; }
+:focus-visible { outline:3px solid var(--honey); outline-offset:5px; }
+.skip { position:absolute; top:8px; left:8px; transform:translateY(-200%); padding:12px; background:var(--linen); color:var(--ink); z-index:5; }
+.skip:focus { transform:none; }
+.masthead { display:flex; justify-content:space-between; align-items:center; padding:38px 5.55%; position:relative; z-index:1; }
+.identity { display:flex; align-items:center; gap:18px; font-family:Georgia,'Times New Roman',serif; font-size:24px; line-height:.95; letter-spacing:3px; }
+.identity-note { display:block; font:11px/1.5 Arial, sans-serif; letter-spacing:1.4px; margin-top:10px; }
+.edition { font-size:12px; letter-spacing:.8px; }
+.edition span { color:var(--copper); margin:0 20px; }
+.campaign { position:relative; min-height:830px; padding:45px 5.55% 64px; isolation:isolate; }
+.intro { position:relative; z-index:1; width:46%; }
+.eyebrow { text-transform:uppercase; font-size:11px; letter-spacing:2px; line-height:1.5; margin:0 0 24px; }
+.intro .eyebrow { display:flex; align-items:center; gap:12px; }
+.intro .eyebrow span { width:7px; height:7px; background:var(--copper); border-radius:50%; }
+h1 { font:normal clamp(56px,6.3vw,96px)/.98 Georgia,'Times New Roman',serif; letter-spacing:-3px; margin:0 0 26px; }
+h1 em { font-weight:normal; }
+.proposition { font-size:16px; line-height:1.7; margin:0; }
+.scene { position:absolute; z-index:-1; inset:-100px 0 0 auto; width:72%; margin:0; mask-image:linear-gradient(to right,transparent,black 28%); }
+.scene img { width:100%; height:100%; object-fit:cover; object-position:50% 71%; display:block; }
+.scene::after { content:""; position:absolute; inset:0; background:linear-gradient(to bottom,transparent 88%,var(--ink)); pointer-events:none; }
+.offer { position:relative; width:440px; max-width:100%; background:var(--linen); color:var(--ink); padding:26px 30px 20px; margin-top:44px; }
+.offer-heading { display:flex; justify-content:space-between; align-items:center; font-size:12px; }
+.offer-heading .eyebrow { margin:0; }
+h2 { font:normal 36px/1.15 Georgia,'Times New Roman',serif; letter-spacing:-1px; margin:12px 0 10px; }
+.description { font-size:13px; line-height:1.6; margin:0 0 24px; }
+.offer-action { display:flex; justify-content:space-between; gap:20px; align-items:center; }
+.price { margin:0; }
+.price span { display:block; font-size:11px; margin-bottom:4px; }
+.price strong { font-weight:normal; font-size:30px; }
+button { white-space:nowrap; min-height:48px; padding:13px 22px; border:2px solid var(--ink); background:var(--honey); color:var(--ink); font-size:14px; font-weight:600; }
+button span { margin-left:18px; }
+button:hover { background:var(--linen); }
+button:active { background:var(--copper); }
+.offer button:focus-visible,dialog button:focus-visible { outline-color:var(--ink); }
+.offer-note { font-size:11px; line-height:1.6; margin:20px 0 0; }
+footer { padding:26px 5.55% 34px; display:flex; gap:20px; justify-content:space-between; font-size:12px; line-height:1.7; }
+footer p { margin:0; }
+dialog { background:var(--linen); color:var(--ink); border:0; width:500px; max-width:calc(100% - 40px); max-height:calc(100% - 40px); padding:36px; }
+dialog::backdrop { background:rgb(4 4 4 / .8); }
+dialog h2 { font-size:42px; }
+dialog p:not(.eyebrow) { font-size:15px; line-height:1.7; }
+dialog .dialog-price { border-block:1px solid var(--ink); padding:20px 0; display:flex; align-items:center; justify-content:space-between; }
+.dialog-price strong { font:normal 32px Georgia,serif; }
+dialog form { margin-top:24px; }
+dialog button { width:100%; }
+.visually-hidden { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+@media (max-width:760px) {
+ .masthead { padding:28px 24px; }
+ .identity { font-size:20px; gap:14px; }
+ .identity svg { width:32px; height:40px; }
+ .edition { display:none; }
+ .campaign { display:flex; flex-direction:column; padding:24px 0 0; min-height:0; }
+ .intro { width:auto; padding:0 24px; }
+ h1 { font-size:clamp(48px,13vw,72px); letter-spacing:-1.8px; line-height:1.02; }
+ .proposition { font-size:15px; }
+ .eyebrow { margin-bottom:20px; }
+ .scene { position:relative; inset:auto; z-index:0; width:100%; height:360px; margin-top:12px; overflow:hidden; mask-image:linear-gradient(to bottom,transparent,black 12%); }
+ .scene img { position:absolute; width:140%; height:140%; left:-20%; top:-25%; object-position:50% 73%; }
+ .scene::after { background:linear-gradient(to bottom,transparent 91%,var(--ink)); }
+ .offer { width:auto; margin:8px 24px 24px; padding:24px; }
+ .offer-action { gap:12px; flex-wrap:wrap; }
+ .offer button { flex:1; }
+ button span { margin-left:10px; }
+ footer { flex-direction:column; gap:10px; padding:20px 24px 32px; }
+ dialog { padding:26px; }
+}
+@media (min-width:520px) and (max-width:760px) {
+ .scene { height:500px; }
+ .scene img { width:100%; height:100%; left:0; top:0; object-position:50% 71%; }
+}
+@media (max-width:380px) {
+ .offer-action { flex-direction:column; align-items:stretch; gap:18px; }
+ .price { display:flex; justify-content:space-between; align-items:center; }
+}
+@media (forced-colors:active) { :focus-visible { outline-color:Highlight; } button { border:2px solid ButtonText; } }
