@@ -197,3 +197,92 @@ def test_application_config_schema_rejects_unknown_fields(tmp_path: Path) -> Non
     path.write_text("schema_version=1\nunknown=true\n[backends]\n", encoding="utf-8")
     with pytest.raises(ConfigLoadError, match="Extra inputs are not permitted"):
         validate_config_file(path)
+
+
+def _validate_feature(app_config, workflow):
+    validate_application(
+        app_config.agents,
+        [workflow],
+        app_config.backends,
+        app_config.project.model_copy(update={"allowed_workflows": [workflow.id]}),
+    )
+
+
+def test_conditional_optional_stage_requires_allow_optional_skip(app_config) -> None:
+    feature = next(item for item in app_config.workflows if item.id == "feature")
+    policy = feature.policy.model_copy(update={"allow_optional_skip": False})
+
+    with pytest.raises(ConfigValidationError, match=r"stages.repair.optional"):
+        _validate_feature(app_config, feature.model_copy(update={"policy": policy}))
+
+
+def test_verified_revision_requires_the_stage_names_the_engine_reads(app_config) -> None:
+    feature = next(item for item in app_config.workflows if item.id == "feature")
+    renamed = [
+        stage.model_copy(
+            update={
+                "id": "decide" if stage.id == "repair_gate" else stage.id,
+                "depends_on": [
+                    "decide" if item == "repair_gate" else item for item in stage.depends_on
+                ],
+            }
+        )
+        for stage in feature.stages
+    ]
+
+    with pytest.raises(ConfigValidationError, match="stage must be named 'repair_gate'"):
+        _validate_feature(app_config, feature.model_copy(update={"stages": renamed}))
+
+
+def test_repair_branch_must_declare_a_revision_output(app_config) -> None:
+    feature = next(item for item in app_config.workflows if item.id == "feature")
+    branches = {name: dict(outputs) for name, outputs in feature.branch_outputs.items()}
+    del branches["repair_needed"]["revision"]
+
+    with pytest.raises(ConfigValidationError, match="must declare a revision output"):
+        _validate_feature(app_config, feature.model_copy(update={"branch_outputs": branches}))
+
+
+def test_verified_research_requires_a_stage_named_verify(app_config) -> None:
+    research = next(item for item in app_config.workflows if item.id == "research")
+    renamed = [
+        stage.model_copy(
+            update={
+                "id": "check" if stage.id == "verify" else stage.id,
+                "depends_on": ["check" if item == "verify" else item for item in stage.depends_on],
+            }
+        )
+        for stage in research.stages
+    ]
+    required = [item.replace("verify.", "check.") for item in research.required_outputs]
+
+    with pytest.raises(ConfigValidationError, match="stage must be named 'verify'"):
+        _validate_feature(
+            app_config, research.model_copy(update={"stages": renamed, "required_outputs": required})
+        )
+
+
+def test_duplicate_profile_in_a_redirect_is_rejected(app_config) -> None:
+    prototype = next(item for item in app_config.workflows if item.id == "prototype")
+    redirects = [
+        item.model_copy(update={"allowed_profiles": [*item.allowed_profiles, item.allowed_profiles[0]]})
+        for item in prototype.allowed_redirects
+    ]
+
+    with pytest.raises(ConfigValidationError, match="duplicate profile"):
+        _validate_feature(app_config, prototype.model_copy(update={"allowed_redirects": redirects}))
+
+
+def test_overlay_path_settings_are_rejected_until_loading_exists(app_config) -> None:
+    project = app_config.project.model_copy(update={"agent_overlay_paths": ["overlays/a.toml"]})
+    with pytest.raises(ConfigValidationError, match="project.agent_overlay_paths"):
+        validate_application(app_config.agents, app_config.workflows, app_config.backends, project)
+
+    project = app_config.project.model_copy(update={"workflow_overlay_paths": ["w.toml"]})
+    with pytest.raises(ConfigValidationError, match="project.workflow_overlay_paths"):
+        validate_application(app_config.agents, app_config.workflows, app_config.backends, project)
+
+    profile = app_config.agents.agents[0].model_copy(update={"overlay_paths": ["x.toml"]})
+    catalog = app_config.agents.model_copy(update={"agents": [profile, *app_config.agents.agents[1:]]})
+    with pytest.raises(ConfigValidationError, match=r"agents\..*overlay_paths"):
+        validate_application(catalog, app_config.workflows, app_config.backends, app_config.project)

@@ -56,6 +56,13 @@ def validate_application(
         if profile.id in profiles:
             issues.append(ValidationIssue(path, f"duplicate AgentProfile ID {profile.id!r}"))
         profiles[profile.id] = profile
+        if profile.overlay_paths:
+            issues.append(
+                ValidationIssue(
+                    f"agents.{profile.id}.overlay_paths",
+                    "overlay loading is not supported yet; leave this empty",
+                )
+            )
         if profile.backend not in backends.backends:
             issues.append(
                 ValidationIssue(f"agents.{profile.id}.backend", "backend is not configured")
@@ -72,6 +79,14 @@ def validate_application(
         _validate_workflow(workflow, profiles, backends, issues)
 
     if project is not None:
+        for field in ("agent_overlay_paths", "workflow_overlay_paths"):
+            if getattr(project, field):
+                issues.append(
+                    ValidationIssue(
+                        f"project.{field}",
+                        "overlay loading is not supported yet; leave this empty",
+                    )
+                )
         for workflow_id in project.allowed_workflows:
             if workflow_id not in workflow_by_id:
                 issues.append(
@@ -101,15 +116,11 @@ def _validate_workflow(
         if stage.id in stages:
             issues.append(ValidationIssue(path, "duplicate stage ID"))
         stages[stage.id] = stage
-        if (
-            stage.optional
-            and stage.when == Condition.ALWAYS
-            and not workflow.policy.allow_optional_skip
-        ):
+        if stage.optional and not workflow.policy.allow_optional_skip:
             issues.append(
                 ValidationIssue(
                     f"{base}.stages.{stage.id}.optional",
-                    "unconditional optional stage requires allow_optional_skip",
+                    "optional stage requires allow_optional_skip",
                 )
             )
         for dependency in stage.depends_on:
@@ -486,6 +497,8 @@ def _validate_workflow(
     for index, redirect in enumerate(workflow.allowed_redirects):
         redirect_stage = stages.get(redirect.stage)
         path = f"{base}.allowed_redirects.{index}"
+        if len(set(redirect.allowed_profiles)) != len(redirect.allowed_profiles):
+            issues.append(ValidationIssue(f"{path}.allowed_profiles", "duplicate profile"))
         if redirect_stage is None:
             issues.append(ValidationIssue(f"{path}.stage", "redirect target does not exist"))
             continue
@@ -672,6 +685,9 @@ def _validate_required_paths(
                 ValidationIssue(base, "prototype validation must reach a required output")
             )
     elif workflow.completion == WorkflowCompletion.VERIFIED_RESEARCH:
+        # The coordinator reads the verification result from the stage named "verify".
+        if "verify" not in stages:
+            issues.append(ValidationIssue(base, "verification stage must be named 'verify'"))
         matching = [
             stage
             for stage in workflow.stages
@@ -686,6 +702,23 @@ def _validate_required_paths(
         elif not any(reaches_required(stage.id) for stage in matching):
             issues.append(ValidationIssue(base, "verification must reach a required output"))
     elif workflow.completion == WorkflowCompletion.VERIFIED_REVISION:
+        # The coordinator looks these stage names up directly when it gates and completes.
+        for fixed_id in ("review", "test"):
+            if fixed_id not in stages:
+                issues.append(ValidationIssue(base, f"stage must be named {fixed_id!r}"))
+        gates = [item for item in workflow.stages if item.kind == StageKind.REPAIR_GATE]
+        if any(item.id != "repair_gate" for item in gates):
+            issues.append(ValidationIssue(base, "stage must be named 'repair_gate'"))
+        if gates:
+            for branch in (Condition.REPAIR_NEEDED.value, Condition.REPAIR_NOT_NEEDED.value):
+                if "revision" not in branches.get(branch, {}):
+                    issues.append(
+                        ValidationIssue(
+                            f"{base}.{branch}", "branch must declare a revision output"
+                        )
+                    )
+        elif "integrate" not in stages and "integration_check" not in stages:
+            issues.append(ValidationIssue(base, "stage must be named 'integrate'"))
         branch_items = list(branches.items()) or [("always", {})]
         for branch, bindings in branch_items:
             if bindings:
