@@ -1146,3 +1146,150 @@ def test_interventions_and_handoffs_are_retrievable_after_reopen(tmp_path, app_c
     with SQLiteLedger(path) as reopened:
         assert reopened.list_interventions("run-1") == (intervention,)
         assert reopened.list_handoffs("run-1") == (handoff,)
+
+
+def _register_attempt(ledger, run_spec, attempt_id="attempt-1"):
+    revision = ledger.get_run("run-1").state.revision
+    ledger.apply(
+        LedgerMutation(
+            command_id=uuid4(),
+            run_id="run-1",
+            expected_revision=revision,
+            actor="coordinator",
+            occurred_at=STAMP,
+            attempt_creations=(
+                AttemptRegistration(
+                    spec=_attempt_spec("run-1", run_spec.snapshot_hash, attempt_id),
+                    stage_id="review",
+                    slot_id="review/1",
+                    state=AttemptState(attempt_id=attempt_id, status=AttemptStatus.PENDING),
+                ),
+            ),
+        )
+    )
+
+
+def _apply(ledger, **fields):
+    return ledger.apply(
+        LedgerMutation(
+            command_id=uuid4(),
+            run_id="run-1",
+            expected_revision=ledger.get_run("run-1").state.revision,
+            actor="coordinator",
+            occurred_at=STAMP,
+            **fields,
+        )
+    )
+
+
+def test_superseded_owner_cannot_apply_or_claim_after_a_new_owner_acquires(
+    tmp_path, app_config
+) -> None:
+    database = tmp_path / "db.sqlite3"
+    lock = tmp_path / "owner.lock"
+    with SQLiteLedger(database) as ledger_a, SQLiteLedger(database) as ledger_b:
+        _, run_spec = _create_run(ledger_a, app_config)
+        _register_attempt(ledger_a, run_spec)
+        _apply(
+            ledger_a,
+            outbox_actions=tuple(
+                OutboxIntent(action_id=uuid4(), action_key=f"k{i}", kind="noop", payload={})
+                for i in range(2)
+            ),
+        )
+        owner_a = CoordinatorOwnership(ledger_a, lock)
+        owner_a.acquire("owner-a", STAMP)
+        # Removing the lock file lets a second process take the OS lock.
+        lock.unlink()
+        owner_b = CoordinatorOwnership(ledger_b, lock)
+        owner_b.acquire("owner-b", STAMP)
+
+        with pytest.raises(LedgerInvariantError, match="superseded"):
+            ledger_a.claim_next_outbox("owner-a", STAMP)
+        with pytest.raises(LedgerInvariantError, match="superseded"):
+            _apply(ledger_a, outbox_actions=())
+        assert ledger_b.claim_next_outbox("owner-b", STAMP) is not None
+
+
+def _succeeded_attempt(ledger, run_spec):
+    _register_attempt(ledger, run_spec)
+    result = WorkerResult.model_validate(
+        {
+            "attempt_id": "attempt-1",
+            "input_revision": "b" * 64,
+            "status": OutputStatus.PASS.value,
+            "summary": "ok",
+        }
+    )
+    _apply(
+        ledger,
+        attempt_updates=(AttemptState(attempt_id="attempt-1", status=AttemptStatus.SUCCEEDED),),
+        attempt_results=(AttemptResultRegistration(attempt_id="attempt-1", result=result),),
+    )
+
+
+def test_finished_attempt_cannot_move_back_to_running(tmp_path, app_config) -> None:
+    with SQLiteLedger(tmp_path / "db.sqlite3") as ledger:
+        _, run_spec = _create_run(ledger, app_config)
+        _succeeded_attempt(ledger, run_spec)
+
+        with pytest.raises(LedgerInvariantError, match="finished"):
+            _apply(
+                ledger,
+                attempt_updates=(
+                    AttemptState(attempt_id="attempt-1", status=AttemptStatus.RUNNING),
+                ),
+            )
+        assert ledger.get_attempt("attempt-1").state.status is AttemptStatus.SUCCEEDED
+
+
+def test_failed_run_cannot_move_back_to_running(tmp_path, app_config) -> None:
+    with SQLiteLedger(tmp_path / "db.sqlite3") as ledger:
+        _create_run(ledger, app_config)
+        _apply(ledger, run_update=RunProjectionUpdate(status=RunStatus.FAILED))
+
+        with pytest.raises(LedgerInvariantError, match="terminal"):
+            _apply(ledger, run_update=RunProjectionUpdate(status=RunStatus.RUNNING))
+        assert ledger.get_run("run-1").state.status is RunStatus.FAILED
+
+
+def test_failed_artifact_publish_keeps_a_file_another_manifest_uses(
+    tmp_path, app_config
+) -> None:
+    content = b"identical report bytes\n"
+    with SQLiteLedger(tmp_path / "db.sqlite3") as ledger:
+        _, run_spec = _create_run(ledger, app_config)
+        _register_attempt(ledger, run_spec)
+        revision = ledger.get_run("run-1").state.revision
+        store = ArtifactStore(tmp_path / "data", ledger)
+
+        def publication(artifact_id):
+            return ArtifactPublication(
+                command_id=uuid4(),
+                expected_run_revision=revision,
+                actor="worker:attempt-1",
+                run_id="run-1",
+                attempt_id="attempt-1",
+                artifact_id=artifact_id,
+                input_revision="inputs-v1",
+                schema_id="review-report-v1",
+                occurred_at=STAMP,
+            )
+
+        original = ledger.record_artifact_manifest
+        calls = 0
+
+        def interleaved(pub, artifact, size):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                # Writer B commits the same content-addressed file while A is mid-publish.
+                ledger.record_artifact_manifest = original  # type: ignore[method-assign]
+                store.publish(publication("artifact-b"), BytesIO(content))
+            raise sqlite3.OperationalError("simulated commit failure")
+
+        ledger.record_artifact_manifest = interleaved  # type: ignore[method-assign]
+        with pytest.raises(sqlite3.OperationalError):
+            store.publish(publication("artifact-a"), BytesIO(content))
+
+        assert store.read("artifact-b") == content

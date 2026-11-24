@@ -109,7 +109,8 @@ class ArtifactStore:
                         manifest = self.ledger.get_artifact_manifest(publication.artifact_id)
                     except BaseException:
                         manifest = None
-                    if manifest is None:
+                    # The file is content-addressed: another committed manifest may share it.
+                    if manifest is None and not self.ledger.artifact_path_in_use(relative_path):
                         destination.unlink(missing_ok=True)
                 raise
         finally:

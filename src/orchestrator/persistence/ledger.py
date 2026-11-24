@@ -100,12 +100,27 @@ class LedgerInvariantError(LedgerError):
     """A mutation violates a persisted runtime invariant."""
 
 
+class OwnerSuperseded(LedgerInvariantError):
+    """This ledger's coordinator lease was replaced by a newer owner generation."""
+
+
 class ReservationConflict(LedgerError):
     """A reservation identity or ownership transition conflicts with existing state."""
 
 
 class OutboxTransitionError(LedgerError):
     """An outbox action cannot make the requested delivery transition."""
+
+
+_FINISHED_ATTEMPT_STATUSES = frozenset(
+    {
+        AttemptStatus.SUCCEEDED,
+        AttemptStatus.FAILED,
+        AttemptStatus.TIMED_OUT,
+        AttemptStatus.CANCELLED,
+    }
+)
+_FINAL_RUN_STATUSES = frozenset({RunStatus.SUCCEEDED, RunStatus.FAILED})
 
 
 def canonical_json(value: Any, *, exclude: set[str] | None = None) -> str:
@@ -158,6 +173,7 @@ class SQLiteLedger:
         )
         self._mutex = RLock()
         self._closed = False
+        self._lease: OwnerLease | None = None
         try:
             self._connection.row_factory = sqlite3.Row
             self._connection.execute("PRAGMA foreign_keys = ON")
@@ -548,6 +564,7 @@ class SQLiteLedger:
         request_payload.pop("occurred_at", None)
         request_hash = content_hash(canonical_json(request_payload))
         with self._transaction() as connection:
+            self._require_current_lease(connection)
             prior = self._existing_command(connection, mutation.command_id, request_hash)
             if prior is not None:
                 return prior
@@ -599,6 +616,14 @@ class SQLiteLedger:
             state_data.update(run_changes)
             state_data["revision"] = current_revision + 1
             current_state = RunState.model_validate(state_data)
+            if (
+                original_state.status in _FINAL_RUN_STATUSES
+                and current_state.status != original_state.status
+            ):
+                raise LedgerInvariantError(
+                    f"run {mutation.run_id} is terminal as {original_state.status.value} "
+                    f"and cannot become {current_state.status.value}"
+                )
             if current_state.status != original_state.status and not self._has_matching_event(
                 mutation.events, RunStatusChangedEvent, current_state.status
             ):
@@ -879,6 +904,11 @@ class SQLiteLedger:
                     "attempt references a missing or mismatched preflight record"
                 )
         previous = AttemptStatus(row["status"])
+        if previous in _FINISHED_ATTEMPT_STATUSES and state.status != previous:
+            raise LedgerInvariantError(
+                f"attempt {state.attempt_id} is finished as {previous.value} and cannot "
+                f"become {state.status.value}"
+            )
         connection.execute(
             "UPDATE attempts SET status = ?, state_payload = ?, updated_at = ? "
             "WHERE attempt_id = ? AND run_id = ?",
@@ -1648,7 +1678,29 @@ class SQLiteLedger:
                 "WHERE singleton = 1",
                 (generation, owner_id, _iso(acquired_at)),
             )
-            return OwnerLease(generation=generation, owner_id=owner_id, acquired_at=acquired_at)
+            lease = OwnerLease(generation=generation, owner_id=owner_id, acquired_at=acquired_at)
+        self._lease = lease
+        return lease
+
+    def _require_current_lease(self, connection: sqlite3.Connection) -> None:
+        """Fence writes: a ledger holding a lease may write only while it is still current."""
+
+        lease = self._lease
+        if lease is None:
+            return
+        row = connection.execute(
+            "SELECT generation, owner_id, released_at FROM owner_state WHERE singleton = 1"
+        ).fetchone()
+        if (
+            row is None
+            or int(row["generation"]) != lease.generation
+            or row["owner_id"] != lease.owner_id
+            or row["released_at"] is not None
+        ):
+            raise OwnerSuperseded(
+                f"coordinator owner {lease.owner_id} generation {lease.generation} "
+                "was superseded"
+            )
 
     def _release_owner(self, lease: OwnerLease, released_at: datetime) -> None:
         with self._transaction() as connection:
@@ -1659,6 +1711,7 @@ class SQLiteLedger:
             )
             if cursor.rowcount != 1:
                 raise LedgerInvariantError("coordinator owner lease is no longer current")
+        self._lease = None
 
     def list_events(self, run_id: str, after_sequence: int = 0) -> tuple[Event, ...]:
         with self._read_transaction() as connection:
@@ -1800,6 +1853,18 @@ class SQLiteLedger:
                 raise KeyError(f"unknown outbox action {action_id}")
             return self._outbox_from_row(row)
 
+    def artifact_path_in_use(self, relative_path: str) -> bool:
+        """Report whether any manifest points at this managed path."""
+
+        with self._read_transaction() as connection:
+            return (
+                connection.execute(
+                    "SELECT 1 FROM artifact_manifests WHERE relative_path = ? LIMIT 1",
+                    (relative_path,),
+                ).fetchone()
+                is not None
+            )
+
     def get_artifact_manifest(self, artifact_id: str) -> ArtifactManifest | None:
         with self._read_transaction() as connection:
             row = connection.execute(
@@ -1878,6 +1943,7 @@ class SQLiteLedger:
 
         now = occurred_at or _now()
         with self._transaction() as connection:
+            self._require_current_lease(connection)
             if run_id is None:
                 row = connection.execute(
                     "SELECT * FROM outbox_actions WHERE status = ? "
