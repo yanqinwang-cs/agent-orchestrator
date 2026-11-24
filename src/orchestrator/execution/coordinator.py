@@ -1292,8 +1292,6 @@ class ExecutionCoordinator:
                     ),
                 )
             elif current.state.status not in {
-                RunStatus.PAUSE_REQUESTED,
-                RunStatus.PAUSED,
                 RunStatus.STOPPING,
                 RunStatus.STOPPED,
                 RunStatus.SUCCEEDED,
