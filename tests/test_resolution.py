@@ -5,12 +5,15 @@ from pydantic import ValidationError
 
 from orchestrator.config import parse_model
 from orchestrator.domain.models import (
+    ContextPolicy,
     Effort,
     ModelBindingSettings,
+    PermissionSet,
     ProfileOverlay,
     ProfileOverlayFile,
     ResolvedOrchestratorPolicy,
     RunOverrides,
+    SandboxMode,
     WorkflowOverlay,
 )
 from orchestrator.resolution import ResolutionError, resolve_run
@@ -220,3 +223,33 @@ def test_pre_m5_resolved_policy_payload_remains_readable(app_config) -> None:
     restored = ResolvedOrchestratorPolicy.model_validate(legacy_payload)
 
     assert restored == spec.workflow.policy.model_copy(update={"decision_questions": ()})
+
+
+def test_narrowing_permission_overlay_resolves_to_typed_profile(app_config) -> None:
+    overlay = ProfileOverlay(profile_id="reviewer", permissions=PermissionSet(sandbox="read-only"))
+
+    spec = _resolve(app_config, profile_overlays=(overlay,))
+
+    reviewer = next(profile for profile in spec.profiles if profile.id == "reviewer")
+    assert isinstance(reviewer.permissions, PermissionSet)
+    assert reviewer.permissions.sandbox is SandboxMode.READ_ONLY
+
+
+def test_context_policy_overlay_resolves_to_typed_profile(app_config) -> None:
+    workflow = next(item for item in app_config.workflows if item.id == "feature")
+    overlay = ProfileOverlay(
+        profile_id="planner", context_policy=ContextPolicy(id="scoped-v1", max_bytes=1000)
+    )
+
+    spec = resolve_run(
+        "Plan the feature",
+        _project_with_models(app_config),
+        workflow,
+        app_config.agents.agents,
+        model_availability=_availability(),
+        profile_overlays=(overlay,),
+    )
+
+    planner = next(profile for profile in spec.profiles if profile.id == "planner")
+    assert isinstance(planner.context_policy, ContextPolicy)
+    assert planner.context_policy.max_bytes == 1000

@@ -321,6 +321,10 @@ def resolve_run(
     return provisional.model_copy(update={"snapshot_hash": snapshot_hash(provisional)})
 
 
+def _plain(value: object) -> object:
+    return value.model_dump() if isinstance(value, BaseModel) else value
+
+
 def _apply_profile_overlays(
     profile: AgentProfile,
     overlays: Sequence[ProfileOverlay],
@@ -341,9 +345,15 @@ def _apply_profile_overlays(
                     f"profile_overlays.{index}.{profile.id}.permissions: "
                     "permission widening is forbidden"
                 )
-        changes = {key: value for key, value in fields.items() if value is not None}
+        # Take typed values from the overlay itself: model_dump would turn nested models
+        # into plain dicts that later code cannot treat as PermissionSet or ContextPolicy.
+        changes = {
+            key: getattr(overlay, key) for key, value in fields.items() if value is not None
+        }
         if changes:
-            current = current.model_copy(update=changes)
+            current = AgentProfile.model_validate(
+                {**current.model_dump(), **{k: _plain(v) for k, v in changes.items()}}
+            )
             for key, value in changes.items():
                 if getattr(profile, key) != value:
                     rendered = value.value if isinstance(value, Effort) else str(value)
