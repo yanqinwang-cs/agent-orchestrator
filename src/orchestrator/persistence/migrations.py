@@ -266,10 +266,70 @@ def _create_v3(connection: sqlite3.Connection) -> None:
     )
 
 
+def _create_v4(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        "CREATE TABLE decision_records ("
+        "decision_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, question_id TEXT NOT NULL, "
+        "schema_version INTEGER NOT NULL, request_payload TEXT NOT NULL, "
+        "request_hash TEXT NOT NULL, "
+        "request_persisted_revision INTEGER NOT NULL CHECK (request_persisted_revision >= 1), "
+        "record_payload TEXT NOT NULL, created_at TEXT NOT NULL, completed_at TEXT, "
+        "FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE)"
+    )
+    connection.execute(
+        "CREATE INDEX decision_records_run_order "
+        "ON decision_records(run_id, created_at, decision_id)"
+    )
+    connection.execute(
+        "CREATE TRIGGER decision_records_write_once BEFORE UPDATE ON decision_records "
+        "WHEN OLD.completed_at IS NOT NULL OR NEW.decision_id IS NOT OLD.decision_id "
+        "OR NEW.run_id IS NOT OLD.run_id OR NEW.question_id IS NOT OLD.question_id "
+        "OR NEW.schema_version IS NOT OLD.schema_version "
+        "OR NEW.request_payload IS NOT OLD.request_payload "
+        "OR NEW.request_hash IS NOT OLD.request_hash "
+        "OR NEW.request_persisted_revision IS NOT OLD.request_persisted_revision "
+        "OR NEW.created_at IS NOT OLD.created_at OR NEW.completed_at IS NULL "
+        "BEGIN SELECT RAISE(ABORT, 'decision request and completed reply are write-once'); END"
+    )
+    connection.execute(
+        "CREATE TRIGGER decision_records_immutable_delete BEFORE DELETE ON decision_records "
+        "BEGIN SELECT RAISE(ABORT, 'decision records are immutable'); END"
+    )
+
+
+def _create_v5(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        "CREATE TABLE backend_preflight_records ("
+        "record_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, attempt_id TEXT NOT NULL, "
+        "preparation_id TEXT NOT NULL, schema_version INTEGER NOT NULL, "
+        "attempt_spec_hash TEXT NOT NULL, accepted INTEGER NOT NULL CHECK (accepted IN (0, 1)), "
+        "record_hash TEXT NOT NULL, payload TEXT NOT NULL, occurred_at TEXT NOT NULL, "
+        "UNIQUE(attempt_id, preparation_id), "
+        "FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE, "
+        "FOREIGN KEY (attempt_id) REFERENCES attempts(attempt_id))"
+    )
+    connection.execute(
+        "CREATE INDEX backend_preflight_run_order "
+        "ON backend_preflight_records(run_id, occurred_at, record_id)"
+    )
+    connection.execute(
+        "CREATE TRIGGER backend_preflight_immutable_update BEFORE UPDATE "
+        "ON backend_preflight_records BEGIN SELECT RAISE(ABORT, "
+        "'backend preflight records are immutable'); END"
+    )
+    connection.execute(
+        "CREATE TRIGGER backend_preflight_immutable_delete BEFORE DELETE "
+        "ON backend_preflight_records BEGIN SELECT RAISE(ABORT, "
+        "'backend preflight records are immutable'); END"
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     (1, "durable-run-ledger", _create_v1),
     (2, "persist-worker-results-and-stage-outputs", _create_v2),
     (3, "persist-control-lifecycle-and-run-attention", _create_v3),
+    (4, "persist-bounded-semantic-decisions", _create_v4),
+    (5, "persist-effective-backend-preflight", _create_v5),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1][0]
 

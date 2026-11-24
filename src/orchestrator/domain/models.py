@@ -9,6 +9,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from orchestrator.domain.decisions import DecisionQuestionConfig, ResolvedDecisionQuestion
+
 Identifier = Annotated[str, StringConstraints(min_length=1, pattern=r"^[a-z][a-z0-9_-]*$")]
 NonEmpty = Annotated[str, StringConstraints(min_length=1)]
 
@@ -247,6 +249,14 @@ class OrchestratorPolicy(StrictModel):
     allow_new_profiles: bool = False
     allow_required_stage_removal: bool = False
     permission_ceiling: PermissionSet | None = None
+    decision_questions: list[DecisionQuestionConfig] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def unique_decision_questions(self) -> OrchestratorPolicy:
+        ids = [question.question_id for question in self.decision_questions]
+        if len(ids) != len(set(ids)):
+            raise ValueError("decision question IDs must be unique within a workflow")
+        return self
 
 
 class WorkflowPreset(StrictModel):
@@ -466,6 +476,7 @@ class ResolvedOrchestratorPolicy(FrozenModel):
     allow_new_profiles: bool = False
     allow_required_stage_removal: bool = False
     permission_ceiling: PermissionSet | None = None
+    decision_questions: tuple[ResolvedDecisionQuestion, ...] = ()
 
 
 class ResolvedWorkflow(FrozenModel):
@@ -631,6 +642,16 @@ class AttemptState(StrictModel):
     worker_thread_id: str | None = None
     worker_turn_id: str | None = None
     worker_lifecycle_owner_id: str | None = None
+    backend_preflight_record_id: str | None = None
+    backend_preflight_record_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+    @model_validator(mode="after")
+    def require_preflight_link_pair(self) -> AttemptState:
+        if (self.backend_preflight_record_id is None) != (
+            self.backend_preflight_record_hash is None
+        ):
+            raise ValueError("preflight record ID and hash must be stored together")
+        return self
 
 
 class Artifact(FrozenModel):
@@ -751,8 +772,22 @@ class EventKind(StrEnum):
     TIMEOUT_DETECTED = "timeout_detected"
     OUTBOX_STATUS_CHANGED = "outbox_status_changed"
     RESERVATION_STATUS_CHANGED = "reservation_status_changed"
+    BACKEND_PREPARATION_INTENT_RECORDED = "backend_preparation_intent_recorded"
     ARTIFACT_RECORDED = "artifact_recorded"
     HANDOFF_RECORDED = "handoff_recorded"
+    DECISION_REQUESTED = "decision_requested"
+    DECISION_INFERENCE_STARTED = "decision_inference_started"
+    DECISION_RESULT_RECORDED = "decision_result_recorded"
+    DECISION_INFERENCE_FAILED = "decision_inference_failed"
+    DECISION_RESULT_REJECTED = "decision_result_rejected"
+    DECISION_RESULT_STALE = "decision_result_stale"
+    DECISION_RESULT_DISALLOWED = "decision_result_disallowed"
+    DECISION_ABSTAINED = "decision_abstained"
+    DECISION_POLICY_EVALUATED = "decision_policy_evaluated"
+    DECISION_ACCEPTED = "decision_accepted"
+    DECISION_FALLBACK = "decision_fallback"
+    DECISION_ATTENTION_REQUIRED = "decision_attention_required"
+    BACKEND_PREFLIGHT_RECORDED = "backend_preflight_recorded"
 
 
 class EventBase(FrozenModel):
@@ -868,6 +903,49 @@ class HandoffRecordedEvent(EventBase):
     handoff: Handoff
 
 
+class DecisionLifecycleEvent(EventBase):
+    kind: Literal[
+        EventKind.DECISION_REQUESTED,
+        EventKind.DECISION_INFERENCE_STARTED,
+        EventKind.DECISION_RESULT_RECORDED,
+        EventKind.DECISION_INFERENCE_FAILED,
+        EventKind.DECISION_RESULT_REJECTED,
+        EventKind.DECISION_RESULT_STALE,
+        EventKind.DECISION_RESULT_DISALLOWED,
+        EventKind.DECISION_ABSTAINED,
+        EventKind.DECISION_POLICY_EVALUATED,
+        EventKind.DECISION_ACCEPTED,
+        EventKind.DECISION_FALLBACK,
+        EventKind.DECISION_ATTENTION_REQUIRED,
+    ]
+    decision_id: UUID
+    question_id: Identifier
+    request_hash: str
+    result_hash: str | None = None
+    disposition_status: str | None = None
+    disposition_reason: str | None = None
+    outcome_id: Identifier | None = None
+    detail: str | None = None
+
+
+class BackendPreflightRecordedEvent(EventBase):
+    kind: Literal[EventKind.BACKEND_PREFLIGHT_RECORDED]
+    record_id: NonEmpty
+    attempt_id: NonEmpty
+    preparation_id: NonEmpty
+    record_hash: NonEmpty
+    accepted: bool
+
+
+class BackendPreparationIntentRecordedEvent(EventBase):
+    kind: Literal[EventKind.BACKEND_PREPARATION_INTENT_RECORDED]
+    action_id: UUID
+    attempt_id: NonEmpty
+    preparation_id: NonEmpty
+    lifecycle_owner_id: NonEmpty
+    attempt_spec_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 type Event = Annotated[
     RunStatusChangedEvent
     | StageStatusChangedEvent
@@ -880,6 +958,9 @@ type Event = Annotated[
     | OutboxStatusChangedEvent
     | ReservationStatusChangedEvent
     | ArtifactRecordedEvent
-    | HandoffRecordedEvent,
+    | HandoffRecordedEvent
+    | DecisionLifecycleEvent
+    | BackendPreparationIntentRecordedEvent
+    | BackendPreflightRecordedEvent,
     Field(discriminator="kind"),
 ]

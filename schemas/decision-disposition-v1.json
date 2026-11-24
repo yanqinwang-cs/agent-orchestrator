@@ -1,0 +1,184 @@
+{
+  "$defs": {
+    "DecisionDispositionReason": {
+      "enum": [
+        "accepted_typed_outcome",
+        "accepted_scored_outcome",
+        "explicit_abstention",
+        "score_below_threshold",
+        "stale_run_revision",
+        "stale_evidence",
+        "disallowed_outcome",
+        "malformed_result",
+        "incompatible_result",
+        "unsupported_score_semantics",
+        "score_mapping_mismatch",
+        "invalid_score_vector",
+        "calibration_mismatch",
+        "inference_identity_mismatch",
+        "engine_failure",
+        "missing_evidence",
+        "outcome_no_longer_allowed"
+      ],
+      "title": "DecisionDispositionReason",
+      "type": "string"
+    },
+    "DecisionDispositionStatus": {
+      "enum": [
+        "accepted",
+        "abstained",
+        "rejected",
+        "fallback",
+        "attention_required"
+      ],
+      "title": "DecisionDispositionStatus",
+      "type": "string"
+    },
+    "DecisionPolicyAction": {
+      "enum": [
+        "continue",
+        "fallback",
+        "attention_required"
+      ],
+      "title": "DecisionPolicyAction",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "action_reference": {
+      "anyOf": [
+        {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Action Reference"
+    },
+    "decision_id": {
+      "format": "uuid",
+      "title": "Decision Id",
+      "type": "string"
+    },
+    "evaluated_at": {
+      "format": "date-time",
+      "title": "Evaluated At",
+      "type": "string"
+    },
+    "policy_action": {
+      "$ref": "#/$defs/DecisionPolicyAction"
+    },
+    "policy_id": {
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "title": "Policy Id",
+      "type": "string"
+    },
+    "policy_revision": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Policy Revision",
+      "type": "string"
+    },
+    "reason": {
+      "$ref": "#/$defs/DecisionDispositionReason"
+    },
+    "request_hash": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Request Hash",
+      "type": "string"
+    },
+    "result_hash": {
+      "anyOf": [
+        {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Result Hash"
+    },
+    "resulting_run_revision": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Resulting Run Revision"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "score_semantics_used": {
+      "anyOf": [
+        {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Score Semantics Used"
+    },
+    "selected_outcome_id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Selected Outcome Id"
+    },
+    "status": {
+      "$ref": "#/$defs/DecisionDispositionStatus"
+    },
+    "threshold_used": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Threshold Used"
+    }
+  },
+  "required": [
+    "decision_id",
+    "request_hash",
+    "status",
+    "policy_action",
+    "reason",
+    "policy_id",
+    "policy_revision",
+    "evaluated_at"
+  ],
+  "title": "DecisionDisposition",
+  "type": "object"
+}

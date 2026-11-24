@@ -8,10 +8,14 @@ version = "0.1.0"
 description = "A deterministic local orchestration foundation for specialist workers"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["pydantic>=2.10,<3"]
+dependencies = [
+    "openai-codex==0.159.2",
+    "pydantic>=2.10,<3",
+]
 
 [project.scripts]
 agent-orchestrator = "orchestrator.cli:main"
+agent-lab-api = "agent_lab.server:main"
 
 [dependency-groups]
 dev = [
@@ -22,7 +26,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/orchestrator"]
+packages = ["src/orchestrator", "src/agent_lab"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -32,7 +36,7 @@ markers = ["live: tests that make explicitly authorized live provider calls"]
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-extend-exclude = ["scripts/check_starter.py", "scripts/codex_task.py"]
+extend-exclude = ["scripts/codex_task.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
@@ -40,6 +44,6 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.mypy]
 python_version = "3.12"
 mypy_path = "src"
-packages = ["orchestrator"]
+packages = ["orchestrator", "agent_lab"]
 show_error_codes = true
 warn_unused_configs = true

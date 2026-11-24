@@ -1,0 +1,1 @@
+For photographic craft, let directional light and visible materials establish the atmosphere; darkness alone is not the style. Choose crops with quiet space for copy and keep the product recognizable. Give the featured product a contrasting, clearly bounded area. Keep typography, alignment and exact geometry open.

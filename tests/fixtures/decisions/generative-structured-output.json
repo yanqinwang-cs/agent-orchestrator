@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "decision_id": "11111111-1111-4111-8111-111111111111",
+  "effective_inference": {
+    "schema_version": 1,
+    "mechanism": "generative_structured_output",
+    "adapter_id": "offline-structured-output-fixture",
+    "adapter_revision": "1"
+  },
+  "consumed_run_revision": 4,
+  "consumed_evidence_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "outcome_id": "implementer",
+  "adapter_result_id": "structured-output-fixture-1"
+}

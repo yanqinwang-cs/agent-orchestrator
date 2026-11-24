@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Lab | Design handoff revision 4</title>
+  <style>
+    @font-face{font-family:Geist;src:url('fonts/Geist-Variable.woff2') format('woff2');font-weight:100 900;font-display:swap}
+    @font-face{font-family:GeistMono;src:url('fonts/GeistMono-Variable.woff2') format('woff2');font-weight:100 900;font-display:swap}
+    :root{color-scheme:dark;--page:#0E1218;--raised:#171E27;--hover:#222E3A;--text:#F2F5F7;--muted:#B8C3CF;--line:#33414F;--control:#667787;--action:#79D9E8;--ember:#FF9367;--bridge:#A8A1E8}
+    *,*::before,*::after{box-sizing:border-box}
+    html{background:var(--page);scroll-padding-top:96px}
+    body{margin:0;background:var(--page);color:var(--text);font:17px/1.55 Geist,Arial,sans-serif}
+    a{color:inherit;text-underline-offset:5px;text-decoration-thickness:1px}
+    a:hover{color:var(--action)}
+    button,input,select,textarea{font:inherit;color:inherit}
+    button,select,input,textarea{border:1px solid var(--control);border-radius:4px;background:var(--raised)}
+    button{cursor:pointer;min-height:44px;padding:10px 16px}
+    button:hover{background:var(--hover)}
+    button:disabled{cursor:default;opacity:.7}
+    :focus-visible{outline:2px solid var(--action);outline-offset:4px}
+    p,h1,h2,h3,li,dd,figcaption,label{overflow-wrap:anywhere}
+    img{display:block;max-width:100%;height:auto}
+    [hidden]{display:none!important}
+    .shell{width:min(100% - 128px,1312px);margin-inline:auto}
+    .skip-link{position:fixed;top:12px;left:12px;z-index:30;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap;background:var(--action);color:var(--page)}
+    .skip-link:focus{position:fixed;width:auto;height:auto;padding:10px 16px;clip-path:none;white-space:normal;max-width:calc(100vw - 24px)}
+    header{position:sticky;top:0;z-index:10;background:var(--page);border-bottom:1px solid var(--line)}
+    .header-row{min-height:72px;display:flex;justify-content:space-between;align-items:center;gap:28px}
+    .identity{font-weight:500;font-size:18px;white-space:nowrap}
+    nav.header-links{display:flex;gap:24px;align-items:center}
+    .header-links a{font-size:14px;text-decoration:none;min-height:44px;display:flex;align-items:center}
+    main{padding-bottom:64px}
+    .intro{padding:64px 0 48px}
+    .meta{font:13px/1.6 GeistMono,monospace;color:var(--muted);margin:0 0 12px}
+    h1{font-size:clamp(36px,4.4vw,64px);line-height:1.08;letter-spacing:-.045em;font-weight:500;max-width:900px;margin:0 0 24px}
+    .lede{font-size:20px;line-height:1.5;max-width:820px;margin:0;color:var(--muted)}
+    .intro-state{display:flex;gap:32px;flex-wrap:wrap;margin:28px 0 0;padding-top:20px;border-top:1px solid var(--line);font-size:14px}
+    .intro-state strong{font-weight:500}
+    .section{padding:48px 0;border-top:1px solid var(--line)}
+    .section-head{display:flex;justify-content:space-between;align-items:baseline;gap:24px;margin-bottom:24px}
+    h2{font-size:32px;line-height:1.2;letter-spacing:-.025em;font-weight:500;margin:0 0 16px}
+    .section-head h2{margin:0}
+    h3{font-size:20px;line-height:1.35;font-weight:500;letter-spacing:-.015em;margin:0 0 12px}
+    .section p{max-width:76ch}
+    .muted{color:var(--muted)}
+    .small{font-size:14px}
+    .section-nav{display:grid;grid-template-columns:1.6fr 1fr 1fr;gap:24px;margin-bottom:24px}
+    .section-nav>*{min-width:0}
+    .section-nav h3{font-size:14px;color:var(--muted);margin:0 0 10px}
+    .button-set{display:flex;flex-wrap:wrap;gap:8px}
+    .button-set button{font-size:13px;padding:9px 12px}
+    .button-set button[aria-pressed=true]{border-color:var(--action);background:var(--action);color:var(--page)}
+    .plate-bar{display:flex;align-items:center;justify-content:space-between;gap:24px;border-top:1px solid var(--line);padding:20px 0 16px}
+    .plate-bar h3{font-size:21px;margin:0}
+    .plate-bar a{font-size:14px;white-space:nowrap}
+    figure{margin:0;min-width:0}
+    .plate-frame{border:1px solid var(--line);background:var(--page);min-width:0;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center}
+    .plate-frame img{width:100%;height:100%;object-fit:contain;min-width:0}
+    .asset-error{max-width:52ch;padding:32px;color:var(--muted);text-align:center}
+    figcaption{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:40px;padding:20px 0 0;font-size:14px}
+    figcaption p{margin:0}
+    .review-metadata{color:var(--muted)}
+    .story-copy{margin:20px 0 0;border-left:2px solid var(--control);padding-left:20px}
+    .story-copy h3{font-size:13px;font-family:GeistMono,monospace;color:var(--muted);letter-spacing:0;font-weight:400;margin:0 0 8px}
+    .story-copy p{font-size:20px;line-height:1.45;margin:0;max-width:70ch}
+    .gallery-actions{display:flex;align-items:center;gap:12px;margin-top:24px}
+    .gallery-actions p{margin:0 0 0 8px;font-size:14px;color:var(--muted)}
+    .palette-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:16px;margin:28px 0}
+    .palette-grid>*{min-width:0}
+    .swatch{height:88px;border:1px solid var(--control);margin-bottom:12px}
+    .swatch-name{display:block;font-size:15px;font-weight:500}
+    .hex{font:13px/1.6 GeistMono,monospace;color:var(--muted)}
+    .progression{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:16px;padding:0;list-style:none;margin:32px 0 0}
+    .progression li{min-width:0;font-size:14px;padding-top:12px;border-top:3px solid var(--control)}
+    .progression strong{display:block;font-weight:500;margin-bottom:4px}
+    .progression span{display:block;color:var(--muted)}
+    .paired{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:48px}
+    .paired>*{min-width:0}
+    .readiness{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:32px;margin-top:28px}
+    .readiness>*{min-width:0}
+    .readiness p{font-size:15px;color:var(--muted);margin:0}
+    .doc-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 48px;padding:0;margin:24px 0 0;list-style:none}
+    .doc-list li{min-width:0;padding:20px 0;border-bottom:1px solid var(--line)}
+    .doc-list a{font-size:16px;font-weight:500;overflow-wrap:anywhere}
+    .doc-list p{font-size:14px;color:var(--muted);margin:6px 0 0}
+    .decision{max-width:840px;background:var(--raised);border:1px solid var(--line);border-radius:8px;padding:32px;margin-top:24px}
+    .field{margin-bottom:24px}
+    .field>label,.field>legend{display:block;margin-bottom:8px;font-weight:500}
+    select,textarea{width:100%;padding:12px;background:var(--page);min-height:48px}
+    textarea{min-height:120px;resize:vertical;line-height:1.5}
+    fieldset{border:0;padding:0;margin:0}
+    .choice{display:flex;gap:12px;align-items:flex-start;margin:12px 0;font-weight:400}
+    .choice input{width:18px;height:18px;margin:5px 0 0;accent-color:var(--action);flex:0 0 auto}
+    .primary{background:var(--action);color:var(--page);border-color:var(--action);font-weight:500}
+    .primary:hover{background:#58BED0;border-color:#58BED0}
+    #review-status{font-size:14px;margin:20px 0 0;color:var(--muted)}
+    footer{padding:32px 0 0;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
+    footer p{margin:0 0 8px;max-width:92ch}
+    .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+    @media(max-width:1100px){.shell{width:calc(100% - 64px)}.header-links{gap:16px!important}.section-nav{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr)}.section-nav>div:first-child{grid-column:1/-1}.palette-grid{gap:12px}.readiness{gap:24px}.progression{grid-template-columns:repeat(3,minmax(0,1fr))}}
+    @media(max-width:767px){.shell{width:calc(100% - 40px)}header{position:static}.header-row{min-height:0;padding:18px 0;display:block}.identity{font-size:17px}.header-links{margin-top:12px;gap:18px!important;flex-wrap:wrap}.header-links a{font-size:13px;min-height:32px}.intro{padding:36px 0}.lede{font-size:18px}.intro-state{gap:12px 24px}.section{padding:36px 0}.section-head{display:block}.section-head>a{display:inline-block;margin-top:10px}h2{font-size:28px}.section-nav{grid-template-columns:minmax(0,1fr);gap:20px}.section-nav>div:first-child{grid-column:auto}.plate-bar{align-items:flex-start;gap:16px}.plate-bar h3{font-size:18px}.plate-bar a{font-size:13px}.plate-frame{border-inline:0}.button-set button{padding:9px 10px}figcaption,.paired,.readiness,.doc-list{grid-template-columns:minmax(0,1fr);gap:20px}.story-copy p{font-size:18px}.gallery-actions{flex-wrap:wrap}.gallery-actions p{width:100%;margin:0}.palette-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}.swatch{height:72px}.progression{grid-template-columns:repeat(2,minmax(0,1fr))}.doc-list{gap:0}.decision{padding:24px 20px}.asset-error{padding:20px;font-size:14px}}
+    @media(max-width:359px){.shell{width:calc(100% - 32px)}.identity{font-size:16px}.header-links{gap:14px!important}.plate-bar{display:block}.plate-bar a{display:inline-block;margin-top:8px}}
+    @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}html{scroll-behavior:auto}}
+
+    .plate-frame{position:relative;container-type:inline-size}
+    .narrative-overlay{position:absolute;z-index:2;left:64%;top:30%;right:4.5%;text-align:left;pointer-events:none}
+    .narrative-overlay h4{margin:0;font:500 3cqw/1.12 Geist,Arial,sans-serif;letter-spacing:-.035em;color:var(--text);overflow-wrap:normal}
+    .narrative-overlay p{margin:1.65cqw 0 0;font:400 1.55cqw/1.38 Geist,Arial,sans-serif;color:var(--muted)}
+    .narrative-actions{display:flex;gap:.8cqw;flex-wrap:wrap;margin-top:1.9cqw}
+    .narrative-actions span{padding:.8cqw 1cqw;border:1px solid var(--control);border-radius:4px;font-size:.95cqw;background:var(--page);white-space:nowrap}
+    .narrative-actions span:first-child{background:var(--action);border-color:var(--action);color:var(--page)}
+    .ecosystem-mark{position:absolute;top:10%;width:5.6%;height:10%;padding:.8%;background:#0E1218;border-radius:4px;z-index:1}
+    .ecosystem-mark img{width:100%;height:100%;object-fit:contain}
+    .ecosystem-mark.github{left:5%}.ecosystem-mark.figma{left:47%}
+    .correction-receipt{font-size:15px;color:var(--muted);padding-left:20px;max-width:84ch}.correction-receipt li{margin:10px 0}
+    @media(max-width:767px){.plate-frame.is-narrative{aspect-ratio:auto;display:flex;flex-direction:column;align-items:stretch}.is-narrative #plate-image{order:2;height:auto;aspect-ratio:16/9}.narrative-overlay{position:static;order:1;padding:24px 20px 28px;pointer-events:none}.narrative-overlay h4{font-size:28px;line-height:1.15}.narrative-overlay p{font-size:18px;line-height:1.45;margin-top:20px}.narrative-actions{gap:10px;margin-top:24px}.narrative-actions span{font-size:13px;padding:12px}.ecosystem-mark{top:auto;bottom:35%;width:8%;height:7%;padding:1%}.ecosystem-mark.figma{left:47%}}
+    @media(max-width:359px){.narrative-overlay{padding:20px 16px}.narrative-overlay h4{font-size:24px}.narrative-overlay p{font-size:17px}}
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to review content</a>
+  <header>
+    <div class="shell header-row">
+      <div class="identity">Agent Lab / Design handoff</div>
+      <nav class="header-links" aria-label="Review board sections">
+        <a href="#visuals">Visuals</a><a href="#palette">Palette</a><a href="#readiness">Readiness</a><a href="#documents">Documents</a><a href="#decision">Decision</a>
+      </nav>
+    </div>
+  </header>
+  <main id="main" class="shell">
+    <section class="intro">
+      <p class="meta">Revision 4 / Prepared 6 October 2026</p>
+      <h1>Agent Lab design handoff</h1>
+      <p class="lede">Review the revised cinematic entrance, calm discovery, and minimal workspace. This is a static review board for the proposed design, not the Agent Lab website.</p>
+      <div class="intro-state"><span><strong>6</strong> narrative key states + <strong>6</strong> retained utility plates</span><span><strong>P2</strong> palette proposal</span><span><strong>Approval pending</strong></span></div>
+    </section>
+
+    <section id="visuals" class="section">
+      <div class="section-head"><h2>Visual set</h2><a href="../ASSET_MANIFEST.md">Open asset manifest</a></div>
+      <div class="section-nav" aria-label="Select a visual plate">
+        <div><h3>Narrative entrance</h3><div class="button-set" id="story-controls">
+          <button type="button" data-index="0" aria-pressed="true">N1 Promise</button>
+          <button type="button" data-index="1" aria-pressed="false">N2 Overload</button>
+          <button type="button" data-index="2" aria-pressed="false">N3 Handoffs</button>
+          <button type="button" data-index="3" aria-pressed="false">N4 Selection</button>
+          <button type="button" data-index="4" aria-pressed="false">N5 Website question</button>
+          <button type="button" data-index="5" aria-pressed="false">N6 Invitation</button>
+        </div></div>
+        <div><h3>Calm discovery</h3><div class="button-set">
+          <button type="button" data-index="6" aria-pressed="false">D1 Overview</button>
+          <button type="button" data-index="7" aria-pressed="false">D2 Results</button>
+          <button type="button" data-index="8" aria-pressed="false">D3 Resource detail</button>
+        </div></div>
+        <div><h3>Workspace and contribution</h3><div class="button-set">
+          <button type="button" data-index="9" aria-pressed="false">W1 Saved setups</button>
+          <button type="button" data-index="10" aria-pressed="false">W2 Configuration</button>
+          <button type="button" data-index="11" aria-pressed="false">C1 Suggestion</button>
+        </div></div>
+      </div>
+      <div class="plate-bar"><h3 id="plate-title">N1 / Entrance promise</h3><a id="original-link" href="narrative-v3/N1-circuit-brain.png" target="_blank" rel="noopener">Open artwork file</a></div>
+      <figure aria-labelledby="plate-title">
+        <div class="plate-frame is-narrative">
+          <img id="plate-image" src="narrative-v3/N1-circuit-brain.png" alt="N1 proposed entrance composition, with a graphite brain and controlled luminous pathways" decoding="async">
+          <div id="narrative-overlay" class="narrative-overlay"><h4 id="narrative-heading">Transform your AI workflow without needing years of experience.</h4><p id="narrative-support" hidden></p><div id="narrative-actions" class="narrative-actions" hidden><span>Explore resources</span><span>Suggest a resource</span></div></div>
+          <div id="github-mark" class="ecosystem-mark github" hidden><img src="brand-assets/github-invertocat-white.svg" alt="GitHub"></div>
+          <div id="figma-mark" class="ecosystem-mark figma" hidden><img src="brand-assets/figma-full-color.svg" alt="Figma"></div>
+          <p id="asset-error" class="asset-error" hidden>This plate is not available at its manifest path. Check the asset package before review.</p>
+        </div>
+        <figcaption>
+          <p id="plate-note">The opening establishes the shared material, lighting, and typography. The full approved promise remains live text in the eventual site.</p>
+          <p class="review-metadata"><span id="plate-class">Review classification: design plate with narrative concept artwork.</span><br>Human approval: pending. This metadata belongs to the review board.</p>
+        </figcaption>
+      </figure>
+      <div class="story-copy" id="story-copy"><h3>Canonical storyline</h3><p id="copy-text">Transform your AI workflow without needing years of experience.</p></div>
+      <div class="gallery-actions"><button type="button" id="previous" disabled>Previous plate</button><button type="button" id="next">Next plate</button><p id="plate-position" role="status">Plate 1 of 12. Review-board controls only.</p></div>
+      <noscript><p>JavaScript is disabled. Open the <a href="../ASSET_MANIFEST.md">asset manifest</a> for direct links to all twelve separate visual plates.</p></noscript>
+    </section>
+
+<section class="section" id="animation-coverage"><h2>Selected keyframes, not an exhaustive animation</h2><p>These images show key visual states. <strong>More keyframes, intermediate poses, transition states and in-between frames are required</strong> to complete the animation. Further images, textures, layers or scene assets may also be needed. The handoff image set is not exhaustive.</p><p class="muted"><strong>N4 only:</strong> cyborg projecting the supplied four-part webpage montage. <strong>N5 and N6:</strong> standalone tablet with the new black-and-blue editorial webpage based on your later reference. N6 reveals the connected network. The cyborg and projecting hand do not repeat in N5/N6.</p><p class="small muted">Expand and review the storyboard/animatic before final motion production. Six stills with crossfades do not complete the continuous camera journey.</p><p><a href="NARRATIVE_CONTINUITY.md">Required transition checkpoints</a> · <a href="screen-content/user-supplied-website-image.png">N4 screen image</a></p></section>
+<section class="section" id="corrections"><h2>Corrections applied in revision 4</h2><ul class="correction-receipt"><li>One stable right-side text anchor across N1–N6; the top-left Agent Lab name is removed from narrative artwork.</li><li>Glossy luminous-circuit brain replaces the rejected strand material. N1/N2 retain the brain; N3 reveals it inside the cyborg.</li><li>N2 includes warning symbols and separately sourced official GitHub/Figma marks.</li><li>N4 projects the supplied montage from the cyborg palm; N5 changes to a standalone tablet with the new blue webpage.</li><li>N6 pulls back to the tablet connected to undulating cyan network terrain, with glowing orbs representing other sites or skills.</li><li>Both queued unreachable-control warnings share the same skip-link cause. The link now stays within the viewport and expands on keyboard focus.</li></ul><p class="small muted">The six new images are static narrative masters. Exact typography is composed here as live text. Continuous motion is specified in the handoff, not implemented by this review board.</p><p><a href="CORRECTIONS_v4.md">Feedback receipt</a> · <a href="NARRATIVE_CONTINUITY.md">Camera and object continuity</a></p></section>
+    <section id="palette" class="section">
+      <h2>Palette P2, proposed for review</h2>
+      <p class="muted">High contrast uses a deep base, bright readable text, and controlled signal colour. The interface action remains cyan while the narrative moves from ember overload toward a calmer cyan resolution.</p>
+      <div class="palette-grid" aria-label="Proposed colour tokens">
+        <div><div class="swatch" style="background:#0E1218"></div><span class="swatch-name">Deep canvas</span><span class="hex">#0E1218</span></div>
+        <div><div class="swatch" style="background:#F2F5F7"></div><span class="swatch-name">Readable text</span><span class="hex">#F2F5F7</span></div>
+        <div><div class="swatch" style="background:#FF9367"></div><span class="swatch-name">Ember signal</span><span class="hex">#FF9367</span></div>
+        <div><div class="swatch" style="background:#79D9E8"></div><span class="swatch-name">Cyan signal / action</span><span class="hex">#79D9E8</span></div>
+        <div><div class="swatch" style="background:#A8A1E8"></div><span class="swatch-name">Optional N3 bridge</span><span class="hex">#A8A1E8</span></div>
+      </div>
+      <ol class="progression" aria-label="Proposed narrative colour progression">
+        <li style="border-color:#667787"><strong>N1</strong><span>Glossy circuit brain</span></li>
+        <li style="border-color:#FF9367"><strong>N2</strong><span>Ember overload</span></li>
+        <li style="border-color:#A8A1E8"><strong>N3</strong><span>Ember recedes; cyan emerges</span></li>
+        <li style="border-color:#79D9E8"><strong>N4</strong><span>Selected paths reach tablet</span></li>
+        <li style="border-color:#667787"><strong>N5</strong><span>Webpage-bearing tablet</span></li>
+        <li style="border-color:#79D9E8"><strong>N6</strong><span>Connected cyan network and orbs</span></li>
+      </ol>
+      <p class="small muted" style="margin-top:24px">Same lighting direction, glossy circuit surfaces, titanium tablet and transparent crown/orb shells, and Geist typography across scenes. P2 is not an accepted final palette. Full values, contrast calculations, placements, and limits are in <a href="../DESIGN_SPEC.md">DESIGN_SPEC.md</a>.</p>
+    </section>
+
+    <section id="readiness" class="section">
+      <h2>What the handoff delivers</h2>
+      <div class="readiness">
+        <div><h3>Design references</h3><p>Twelve separate section and product-surface plates, exact storyline, proposed tokens, responsive rules, interactions, and implementation requirements. Selection does not imply human approval.</p></div>
+        <div><h3>Evidence dependency</h3><p>No genuine website before/after pair has been supplied. The tablet webpage is now an explicitly requested narrative concept. The genuine evidence slot remains handoff-only; it is not a result claim.</p></div>
+        <div><h3>3D source dependency</h3><p>These plates are still images. Interactive geometry, layers, camera paths, morph targets, and video have separate readiness states in the manifest. A 3D-looking render is not a delivered GLB.</p></div>
+      </div>
+      <div class="paired" style="margin-top:36px">
+        <div><h3>Narrative and outputs remain distinct</h3><p class="muted small">Brain, cyborg, fragmented-signal, and refinement scenes are conceptual artwork. Resource previews must show a genuine result tied to the resource, or omit media and use real metadata. Classification appears here and in the manifest, not as decorative product labels.</p></div>
+        <div><h3>Motion is specified, not implemented</h3><p class="muted small">The future first-visit entrance plays automatically for approximately 36 seconds, with no visible playback or scene-navigation controls. An eligible key or bare-scene tap skips directly to discovery. Returning visits, direct links, reduced motion and save-data bypass it. N6 retains Explore resources and Suggest a resource. This review board remains static; its selectors browse documents, not the website.</p></div>
+      </div>
+    </section>
+
+    <section id="documents" class="section">
+      <h2>Handoff documents</h2>
+      <ul class="doc-list">
+        <li><a href="../IMPLEMENTATION_PLAN.md">IMPLEMENTATION_PLAN.md</a><p>Routes, twelve surfaces, asset dependencies, saved-setup behaviour, and acceptance checks.</p></li>
+        <li><a href="../DESIGN_SPEC.md">DESIGN_SPEC.md</a><p>Proposed geometry, type, colour, responsive layout, interaction states, and motion.</p></li>
+        <li><a href="../REFERENCE_BOARD.md">REFERENCE_BOARD.md</a><p>Static, interactive, 3D, motion/video, and supplied visual references with adaptation notes.</p></li>
+        <li><a href="../ASSET_MANIFEST.md">ASSET_MANIFEST.md</a><p>Exact files, intended placement, source/provenance, classification, and approval status.</p></li>
+        <li><a href="CONTENT_AND_EVIDENCE.md">CONTENT_AND_EVIDENCE.md</a><p>Canonical narrative, necessary interface text, genuine-output requirements, and publishing boundaries.</p></li>
+      </ul>
+    </section>
+
+    <section id="decision" class="section">
+      <h2>Review decision</h2>
+      <p class="muted">Choose a scope and decision. Nothing is submitted when you change a control. Queue only when ready, then use Send to Agent. The board never marks assets approved automatically, and design approval does not authorise a frontend build.</p>
+      <form id="review-form" class="decision" data-lavish-question="agent-lab-handoff-v2-review">
+        <div class="field"><label for="review-scope">Review scope</label><select id="review-scope" name="scope" required>
+          <option value="" selected disabled>Choose scope</option>
+          <option value="whole">Palette P2 and all 12 visual plates</option>
+          <option value="palette">Palette P2 only</option>
+          <option value="current">Currently selected visual plate</option>
+        </select></div>
+        <fieldset class="field"><legend>Decision</legend>
+          <label class="choice"><input type="radio" name="decision" value="approve" required><span>Approve the selected design scope</span></label>
+          <label class="choice"><input type="radio" name="decision" value="revise"><span>Request changes before approval</span></label>
+        </fieldset>
+        <div class="field"><label for="review-notes">Notes or requested changes</label><textarea id="review-notes" name="notes" maxlength="6000"></textarea></div>
+        <button class="primary" type="submit">Queue review decision</button>
+        <p id="review-status" role="status" aria-live="polite">Nothing queued. Approval remains pending.</p>
+      </form>
+    </section>
+    <footer>
+      <p>Design source: the user's revised cinematic direction and palette proposal P2 in DESIGN_SPEC.md, using the project's proposed Geist assets. No fallback visual system or new logo was introduced.</p>
+      <p>This is a static handoff review file. No Agent Lab frontend, animation, route change, runtime integration, or public deployment is implemented here.</p>
+    </footer>
+  </main>
+  <script>
+    const plates = [
+      {"id": "N1", "title": "Entrance promise", "file": "narrative-v3/N1-circuit-brain.png", "alt": "Same glossy circuit brain, centered in the left art field; quiet cyan routes and sparse ember junctions.", "note": "Same glossy circuit brain, centered in the left art field; quiet cyan routes and sparse ember junctions. Copy shares the same fixed right-side anchor. No Agent Lab corner name or playback controls.", "copy": "Transform your AI workflow without needing years of experience."},
+      {"id": "N2", "title": "Tool overload", "file": "narrative-v3/N2-overloaded-brain.png", "alt": "Same brain and pose, expanding gently into hotter ember overload; three warning signs. Official GitHub and Figma marks are separate, unmodified ecosystem references.", "note": "Same brain and pose, expanding gently into hotter ember overload; three warning signs. Official GitHub and Figma marks are separate, unmodified ecosystem references. Copy shares the same fixed right-side anchor. No Agent Lab corner name or playback controls.", "copy": "More tools. More plugins. More confusion. How do we know what actually gets results?"},
+      {"id": "N3", "title": "Cyborg reveal", "file": "narrative-v3/N3-cyborg-reveal.png", "alt": "Camera pulls back from that brain to reveal its cyborg cranial dome, then a second entity across a fragmented exchange.", "note": "Camera pulls back from that brain to reveal its cyborg cranial dome, then a second entity across a fragmented exchange. Copy shares the same fixed right-side anchor. No Agent Lab corner name or playback controls.", "copy": "Add more agents and coordination gets harder; poor handoffs can erode productivity gains."},
+      {"id": "N4", "title": "Cyborg projection", "file": "narrative-v4/N4-cyborg-projects-hologram.png", "alt": "N4 only: the cyborg projects the supplied four-part website montage toward the viewer from its palm.", "note": "N4 only: the cyborg projects the supplied four-part website montage toward the viewer from its palm. Selected key state; additional animation frames are required.", "copy": "Why Agent Lab? We study, test, select, and curate what your AI system actually needs."},
+      {"id": "N5", "title": "New editorial webpage", "file": "narrative-v4/N5-blue-editorial-tablet.png", "alt": "N5 uses the new black/blue editorial webpage on a standalone tablet, based on the later reference. No cyborg or projecting hand.", "note": "N5 uses the new black/blue editorial webpage on a standalone tablet, based on the later reference. No cyborg or projecting hand. Selected key state; additional animation frames are required.", "copy": "Ever wondered how to build the website you saw on Pinterest?"},
+      {"id": "N6", "title": "New webpage and network", "file": "narrative-v4/N6-blue-webpage-network.png", "alt": "N6 pulls back from the same new-webpage tablet into the connected cyan network and glowing resource orbs. No cyborg or projecting hand.", "note": "N6 pulls back from the same new-webpage tablet into the connected cyan network and glowing resource orbs. No cyborg or projecting hand. Selected key state; additional animation frames are required.", "copy": "Find the tools you need now, or join us and help shape what comes next."},
+      {id:'D1',title:'Discovery overview',file:'07-discovery-overview.png',alt:'Proposed calm Agent Lab discovery overview with search and restrained editorial resource groupings',note:'The same identity becomes a quiet resource discovery surface. Production content uses actual resource metadata; the concept imagery is not a resource result.'},
+      {id:'D2',title:'Discovery results',file:'08-discovery-results.png',alt:'Proposed readable resource results with restrained controls and metadata',note:'Search, filters, readable metadata, and genuine relevant previews support scanning. No cinematic interaction or invented ranking is implied.'},
+      {id:'D3',title:'Resource detail',file:'09-resource-detail.png',alt:'Proposed resource detail layout for actual instructions, source information, and genuine output when available',note:'A resource detail page explains actual instructions, prerequisites, versions, and source. A brain or cyborg scene must never stand in for its output.'},
+      {id:'W1',title:'Saved setups',file:'10-workspace-saved-setups.png',alt:'Proposed minimal private workspace showing saved setups and necessary actions',note:'Open, search, duplicate, and remove saved setups. No dashboard, analytics, activity feed, or collaboration system is introduced.'},
+      {id:'W2',title:'Workspace configuration',file:'11-workspace-configuration.png',alt:'Proposed focused setup editor for agent-specific resources, model settings, and pinned versions',note:'Find resources, add or swap them for the selected agent, pin versions, and save. Saving preserves configuration; it does not execute a harness.'},
+      {id:'C1',title:'Contribution suggestion',file:'12-contribution-suggestion.png',alt:'Proposed short suggestion form for a real resource link and useful context',note:'A necessary form with confirmed submission and recoverable failure states. Receipt and publication remain separate.'}
+    ];
+    let current = 0;
+    const image = document.getElementById('plate-image');
+    const imageError = document.getElementById('asset-error');
+    const form = document.getElementById('review-form');
+    const status = document.getElementById('review-status');
+    const scope = document.getElementById('review-scope');
+    function showPlate(index) {
+      if (index < 0 || index >= plates.length) return;
+      current = index;
+      const plate = plates[index];
+      image.hidden = false;
+      imageError.hidden = true;
+      const assetPath = '' + (index < 6 ? plate.file : 'visuals-v2/' + plate.file);
+      image.src = assetPath;
+      image.alt = plate.id + ': ' + plate.alt;
+      document.querySelector('.plate-frame').classList.toggle('is-narrative', index < 6);
+      document.getElementById('narrative-overlay').hidden = index >= 6;
+      const support = index === 1 ? 'How do we know what actually gets results?' : index === 3 ? 'We study, test, select, and curate what your AI system actually needs.' : '';
+      const heading = index === 1 ? 'More tools. More plugins. More confusion.' : index === 3 ? 'Why Agent Lab?' : plate.copy || '';
+      document.getElementById('narrative-heading').textContent = heading;
+      document.getElementById('narrative-support').textContent = support;
+      document.getElementById('narrative-support').hidden = !support;
+      document.getElementById('narrative-actions').hidden = index !== 5;
+      document.getElementById('github-mark').hidden = index !== 1;
+      document.getElementById('figma-mark').hidden = index !== 1;
+      document.getElementById('plate-title').textContent = plate.id + ' / ' + plate.title;
+      document.getElementById('original-link').href = assetPath;
+      document.getElementById('plate-note').textContent = plate.note;
+      document.getElementById('plate-class').textContent = index < 6 ? 'Review classification: design plate with narrative concept artwork.' : 'Review classification: product-surface design reference, not an implemented website.';
+      document.getElementById('story-copy').hidden = !plate.copy;
+      document.getElementById('copy-text').textContent = plate.copy || '';
+      document.getElementById('plate-position').textContent = 'Plate ' + (index + 1) + ' of 12. Review-board controls only.';
+      document.querySelectorAll('button[data-index]').forEach(button => button.setAttribute('aria-pressed', String(Number(button.dataset.index) === index)));
+      document.getElementById('previous').disabled = index === 0;
+      document.getElementById('next').disabled = index === plates.length - 1;
+      scope.querySelector('option[value="current"]').textContent = 'Current plate: ' + plate.id + ' / ' + plate.title;
+      if (scope.value === 'current') status.textContent = 'Selected plate changed to ' + plate.id + '. Any previously queued decision is unchanged. Queue again to update it.';
+    }
+    image.addEventListener('error', () => { image.hidden = true; imageError.hidden = false; });
+    document.querySelectorAll('button[data-index]').forEach(button => button.addEventListener('click', () => showPlate(Number(button.dataset.index))));
+    document.getElementById('previous').addEventListener('click', () => showPlate(current - 1));
+    document.getElementById('next').addEventListener('click', () => showPlate(current + 1));
+    form.addEventListener('input', () => { status.textContent = 'Local selection changed. Any previously queued decision is unchanged. Queue when ready; approval remains pending.'; });
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (!form.reportValidity()) return;
+      const data = new FormData(form);
+      const disposition = String(data.get('decision'));
+      const notes = String(data.get('notes') || '').trim();
+      const selectedScope = String(data.get('scope'));
+      const ids = selectedScope === 'whole' ? ['P2', ...plates.map(plate => plate.id)] : selectedScope === 'palette' ? ['P2'] : [plates[current].id];
+      const scopeLabel = selectedScope === 'whole' ? 'palette P2 and all 12 revision-4 visual plates' : selectedScope === 'palette' ? 'palette proposal P2 only' : plates[current].id + ' / ' + plates[current].title;
+      const action = disposition === 'approve' ? 'Approve the selected design scope' : 'Request changes before approval';
+      const text = 'Agent Lab handoff revision 4 review. ' + action + ': ' + scopeLabel + '.' + (notes ? '\nRequested notes or changes: ' + notes : '') + '\nAccount for each submitted scope ID. Record approval only for the explicitly approved design scope and exact current revision. Do not implement the frontend or treat conceptual artwork as real output evidence.';
+      if (typeof window.lavish?.queuePrompt !== 'function') {
+        status.textContent = 'This standalone file cannot queue feedback. Open it in Lavish to queue a decision. Nothing has been submitted or approved.';
+        return;
+      }
+      try {
+        await window.lavish.queuePrompt(text, {tag:'design-review',text:'Agent Lab v4 review: ' + scopeLabel,queueKey:'agent-lab-handoff-v2-review',element:form,data:{revision:'v4',scopeIds:ids,disposition,notes}});
+        status.textContent = 'Decision queued for ' + scopeLabel + '. Use Send to Agent to submit it. No approval has been recorded automatically.';
+      } catch {
+        status.textContent = 'The decision could not be queued. Your choices are still here. Nothing has been approved automatically.';
+      }
+    });
+    showPlate(0);
+  </script>
+</body>
+</html>

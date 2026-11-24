@@ -1,0 +1,89 @@
+{
+  "fixture_kind": "captured_live_sanitized",
+  "provider_traffic": false,
+  "runtime": {
+    "sdk_distribution": "openai-codex",
+    "sdk_version": "0.159.2",
+    "cli_distribution": "openai-codex-cli-bin",
+    "cli_version": "0.159.2",
+    "source_revision": "ff6aec96948b70d94983af2641a6b67c94faeff5",
+    "codex_home": "/Users/yanqinwang/.orchestrator-codex-live"
+  },
+  "effective_config": {
+    "allow_login_shell": true,
+    "approval_policy": "never",
+    "background_terminal_max_timeout": 300000,
+    "chatgpt_base_url": "https://chatgpt.com/backend-api/",
+    "cli_auth_credentials_store": "file",
+    "features": {
+      "api_key_model_discovery": false,
+      "auth_elicitation": false,
+      "background_paginated_rollout_migration": false,
+      "codex_apps_mcp_2026_07_28": false,
+      "mcp_2026_07_28": false,
+      "memories": false,
+      "mentions_v2": false,
+      "multi_agent": false,
+      "network_proxy": null,
+      "remote_control": false,
+      "remote_plugin": false,
+      "tool_suggest": false,
+      "windows_sandbox_service": false
+    },
+    "file_opener": "vscode",
+    "hide_agent_reasoning": false,
+    "history": {
+      "max_bytes": null,
+      "persistence": "save-all"
+    },
+    "include_apps_instructions": true,
+    "include_collaboration_mode_instructions": true,
+    "include_environment_context": true,
+    "include_permissions_instructions": true,
+    "marketplaces": {},
+    "mcp_oauth_credentials_store": "auto",
+    "mcp_servers": {},
+    "model_providers": {},
+    "plugins": {},
+    "profiles": {},
+    "project_doc_fallback_filenames": [],
+    "project_doc_max_bytes": 32768,
+    "project_root_markers": [
+      ".git"
+    ],
+    "sandbox_mode": "read-only",
+    "shell_environment_policy": {
+      "exclude": null,
+      "experimental_use_profile": null,
+      "filters": null,
+      "ignore_default_excludes": null,
+      "include_only": null,
+      "inherit": null,
+      "set": null
+    },
+    "web_search": "disabled"
+  },
+  "layers": [
+    {
+      "name": "user",
+      "config": {
+        "approval_policy": "never",
+        "features": {
+          "auth_elicitation": false,
+          "mentions_v2": false,
+          "multi_agent": false,
+          "remote_plugin": false,
+          "tool_suggest": false
+        },
+        "sandbox_mode": "read-only",
+        "web_search": "disabled"
+      }
+    },
+    {
+      "name": "system",
+      "config": {}
+    }
+  ],
+  "feature_registry_fixture": "codex-features-list-0.159.2.txt",
+  "notes": "Captured through the pinned public SDK config/read request and the pinned CLI features list. Credentials, account data and provider output are excluded."
+}

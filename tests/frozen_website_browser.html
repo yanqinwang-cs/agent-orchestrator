@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>390px sample verification</title>
+  <style>
+    body { background:#11181f; color:#eef2f1; font:14px system-ui; margin:16px; }
+    iframe { display:block; width:390px; height:760px; border:1px solid #35444f; }
+    button { font:inherit; margin:12px 8px 12px 0; padding:8px; }
+    pre { white-space:pre-wrap; }
+  </style>
+</head>
+<body>
+  <p>Local test viewport · 390px wide</p>
+  <div>
+    <button onclick="go(0)">Introduction</button>
+    <button onclick="go(1)">Full required</button>
+    <button onclick="go(2)">Full control</button>
+    <button onclick="go(3)">Minimal required</button>
+    <button onclick="go(4)">Minimal control</button>
+    <button onclick="go(5)">Credits</button>
+    <button onclick="inspect()">Native inspection</button>
+  </div>
+  <iframe id="sample" title="Frozen sample at 390px" src="../website/samples/four-instructed-runs/"></iframe>
+  <pre id="checks" aria-live="polite"></pre>
+  <script>
+    const frame = document.getElementById('sample');
+    function go(n) {
+      const d = frame.contentDocument;
+      if (d.getElementById('viewer').open) d.getElementById('viewer').close();
+      const targets = [d.querySelector('main'), ...d.querySelectorAll('.run'), d.querySelector('#credits')];
+      targets[n].scrollIntoView();
+    }
+    function inspect() {
+      frame.contentDocument.querySelector('[data-inspect]').click();
+    }
+    frame.onload = async () => {
+      const d = frame.contentDocument;
+      const w = frame.contentWindow;
+      const images = [...d.querySelectorAll('figure img')];
+      const pairs = [...d.querySelectorAll('.pair')];
+      const results = {
+        viewport: w.innerWidth,
+        noHorizontalOverflow: d.documentElement.scrollWidth === d.documentElement.clientWidth,
+        allEightLoaded: images.length === 8 && images.every(i => i.complete && i.naturalWidth > 0),
+        allPairsStacked: pairs.every(p => w.getComputedStyle(p).gridTemplateColumns.split(' ').length === 1),
+        allImagesUncropped: images.every(i => Math.abs(i.clientWidth / i.clientHeight - i.naturalWidth / i.naturalHeight) < 0.01)
+      };
+      const buttons = [...d.querySelectorAll('[data-inspect]')];
+      results.allEightNativeSizes = buttons.length === 8 && buttons.every(button => {
+        button.click();
+        const image = d.getElementById('native-image');
+        const original = d.getElementById(button.dataset.inspect);
+        const good = image.clientWidth === original.naturalWidth && image.clientHeight === original.naturalHeight;
+        d.getElementById('close-viewer').click();
+        return good;
+      });
+      const button = buttons[0];
+      button.click();
+      const viewport = d.querySelector('.viewport');
+      viewport.scrollLeft = 100;
+      viewport.scrollTop = 100;
+      results.nativeScroll = viewport.scrollLeft === 100 && viewport.scrollTop === 100;
+      const viewer = d.getElementById('viewer');
+      results.dialogFits = viewer.scrollHeight === viewer.clientHeight;
+      d.getElementById('close-viewer').click();
+      await new Promise(resolve => w.requestAnimationFrame(resolve));
+      results.restoredFocus = d.activeElement === button;
+      go(0);
+      document.getElementById('checks').textContent = JSON.stringify(results, null, 2);
+    };
+  </script>
+</body>
+</html>

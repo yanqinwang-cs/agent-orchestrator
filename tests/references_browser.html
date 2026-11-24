@@ -1,0 +1,80 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Reference browsing verification</title><style>body{font:14px system-ui;background:#11181f;color:#eef2f1}iframe{width:390px;height:844px;border:1px solid #35444f}pre{white-space:pre-wrap}button{padding:12px;margin:8px}</style><h1>Reference browsing verification</h1><button id="run">Run browsing checks</button><button id="blender">Show Blender at 390px</button><button id="workflows">Show workflows at 390px</button><button id="frontend">Show Frontend at 390px</button><iframe id="view" title="Reference page at 390px" src="../website/references/blender/"></iframe><pre id="results" role="status"></pre><script>
+const frame = document.querySelector('#view');
+const output = document.querySelector('#results');
+const results = [];
+const load = path => new Promise(resolve => {frame.onload = resolve; frame.src = path;});
+const navigation = action => new Promise(resolve => {frame.onload = resolve; action();});
+const doc = () => frame.contentDocument;
+function check(name, condition) { results.push({name, passed: Boolean(condition)}); if (!condition) throw Error(name); }
+const visible = () => [...doc().querySelectorAll('.entry')].filter(e => !e.hidden);
+const stacked = () => doc().documentElement.scrollWidth === 390 && [...doc().querySelectorAll('.facts')].every(e => frame.contentWindow.getComputedStyle(e).gridTemplateColumns.split(' ').length === 1);
+document.querySelector('#run').onclick = async () => {
+ results.length = 0;
+ try {
+  await load('../website/discovery.html');
+  const main = doc().querySelector('main');
+  const entrance = main.querySelector('[aria-label="Browse references"]');
+  check('Discovery entrances before catalog search', Boolean(entrance.compareDocumentPosition(main.querySelector('#ed-query')) & Node.DOCUMENT_POSITION_FOLLOWING));
+  check('Discovery has three topic links and original feature', entrance.querySelectorAll('a').length === 3 && main.querySelectorAll('.feature,.support').length === 3);
+  check('Frozen entry immediately after Browse all', main.querySelector('[data-all]').parentElement.nextElementSibling.id === 'frozen-study');
+  check('Discovery narrow entrances stack without overflow', frame.contentWindow.getComputedStyle(entrance.querySelector('.reference-links')).gridTemplateColumns.split(' ').length === 1 && doc().querySelector('#ed-site').scrollWidth === doc().querySelector('#ed-site').clientWidth);
+  main.querySelector('[data-all]').click();
+  check('Existing catalog still browses six examples', doc().querySelectorAll('.resource-row').length === 6);
+  for (const slug of ['frontend','blender','workflows']) {
+   await load('../website/references/'+slug+'/');
+   check(slug+' direct page and 390px facts', stacked());
+   check(slug+' labelled search and result announcement', doc().querySelector('label').htmlFor === 'reference-query' && doc().querySelector('#result-count').getAttribute('aria-live') === 'polite');
+   check(slug+' source only; no execution or download', visible().every(e => {const a=e.querySelector('.source');return a && !a.hasAttribute('download') && !e.querySelector('button');}));
+   for (const entry of visible()) {entry.querySelector('summary').click();check(slug+' details open', entry.querySelector('details').open);}
+  }
+  await load('../website/references/blender/');
+  await navigation(() => doc().querySelector('[data-filter="animation"]').click());
+  check('Animation shows only animation source', visible().length === 1 && visible()[0].querySelector('.source').href === 'https://docs.blender.org/manual/en/latest/animation/index.html');
+  doc().querySelector('#reference-query').value = 'rigging';
+  await navigation(() => doc().querySelector('button').click());
+  check('Search retains animation in address', frame.contentWindow.location.search.includes('topic=animation') && visible().length === 1);
+  await navigation(() => frame.contentWindow.location.reload());
+  check('Reload preserves query/filter', doc().querySelector('#reference-query').value === 'rigging' && visible().length === 1);
+  doc().querySelector('#reference-query').value = 'unmatched xyz';
+  await navigation(() => doc().querySelector('button').click());
+  check('No matches and clear action', !doc().querySelector('#empty').hidden && visible().length === 0);
+  await navigation(() => doc().querySelector('#empty a').click());
+  check('Clear restores all', visible().length === 2 && !doc().querySelector('#reference-query').value);
+  await load('../website/references/blender/?topic=invalid&q=%3Cscript%3E');
+  check('Unknown topic fallback and safe literal query', doc().querySelector('[name=topic]').value === 'all' && doc().querySelector('#reference-query').value === '<script>' && visible().length === 0);
+  await load('../website/references/workflows/');
+  await navigation(() => doc().querySelector('[data-filter="agent"]').click());
+  check('Agent requirements visible before source', visible().length === 1 && visible()[0].textContent.includes('model-provider access') && visible()[0].textContent.includes('does not promise a free run') && visible()[0].querySelector('.source').href === 'https://docs.langflow.org/get-started-quickstart');
+  await load('../website/references/frontend/');
+  check('Frontend keeps one study separate from empty sources', visible().length === 1 && doc().querySelector('#result-count').textContent === '0 source samples · All purposes' && doc().querySelector('#study-count').textContent === '1 study');
+  check('Frontend has five empty purpose categories', doc().querySelectorAll('[data-purpose]').length === 6 && [...doc().querySelectorAll('[data-purpose]')].every(a => a.textContent.endsWith(' · 0')));
+  doc().querySelector('#sample-metadata summary').click();
+  check('Frontend metadata disclosure opens without narrowing study', doc().querySelector('#sample-metadata').open && visible().length === 1 && stacked());
+  for (const purpose of ['landing','portfolio','reading','app','shop']) {
+   await navigation(() => doc().querySelector('[data-purpose="'+purpose+'"]').click());
+   check('Frontend '+purpose+' selection is empty, study stays independent', doc().querySelector('[name=purpose]').value === purpose && doc().querySelector('[data-purpose="'+purpose+'"]').getAttribute('aria-current') === 'page' && visible().length === 1 && !doc().querySelector('#clear-filters').hidden && stacked());
+  }
+  doc().querySelector('#reference-query').value = 'captures';
+  await navigation(() => doc().querySelector('button').click());
+  check('Frontend search retains purpose and finds study', frame.contentWindow.location.search.includes('purpose=shop') && visible().length === 1);
+  await navigation(() => doc().querySelector('[data-purpose=landing]').click());
+  check('Frontend purpose retains submitted query', doc().querySelector('#reference-query').value === 'captures' && visible().length === 1);
+  await navigation(() => frame.contentWindow.location.reload());
+  check('Frontend reload restores selection and query', doc().querySelector('[name=purpose]').value === 'landing' && doc().querySelector('#reference-query').value === 'captures');
+  await navigation(() => frame.contentWindow.history.back());
+  check('Frontend Back restores prior purpose', doc().querySelector('[name=purpose]').value === 'shop' && doc().querySelector('#reference-query').value === 'captures');
+  doc().querySelector('#reference-query').value = 'unmatched xyz';
+  await navigation(() => doc().querySelector('button').click());
+  check('Frontend unmatched search keeps sources honest and study recovery visible', visible().length === 0 && !doc().querySelector('#study-empty').hidden && doc().querySelector('#result-count').textContent.startsWith('0 source samples'));
+  await navigation(() => doc().querySelector('#study-empty a').click());
+  check('Frontend clear restores default and study', visible().length === 1 && doc().querySelector('[name=purpose]').value === 'all' && !doc().querySelector('#reference-query').value);
+  await load('../website/references/frontend/?purpose=invalid&q=%3Cscript%3E');
+  check('Frontend unknown purpose and literal query are safe', doc().querySelector('[name=purpose]').value === 'all' && doc().querySelector('#reference-query').value === '<script>' && visible().length === 0);
+  await navigation(() => doc().querySelector('#clear-filters').click());
+  await navigation(() => doc().querySelector('.source').click());
+  check('Frontend opens existing sample', doc().title.includes('Four instructed design runs'));
+  output.textContent = 'PASS: '+results.length+' rendered checks\n'+JSON.stringify(results,null,2);
+ } catch(error) {output.textContent='FAIL: '+error.message+'\n'+JSON.stringify(results,null,2);}
+};
+for (const slug of ['blender','workflows','frontend']) document.querySelector('#'+slug).onclick=()=>load('../website/references/'+slug+'/');
+</script></html>

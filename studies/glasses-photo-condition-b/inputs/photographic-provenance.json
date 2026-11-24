@@ -1,0 +1,29 @@
+{
+  "creator": "Hữu Phú (@huufus)",
+  "source": "https://unsplash.com/photos/a-pair-of-glasses-sitting-on-top-of-a-window-sill-zWEN9vR_VN0",
+  "original_url": "https://images.unsplash.com/photo-1678104119868-ef897d65d8f8",
+  "license": "https://unsplash.com/license",
+  "rights_review": "Unsplash free copyright license inspected; terms section 5 excludes depicted brands/people/art. No identifiable brand, person or artwork observed in inspected original. Local fictional demo only; not commercial clearance. No image substitution or brand removal.",
+  "camera": "Canon EOS 7D, as attributed by source",
+  "dimensions": [
+    3456,
+    5184
+  ],
+  "edits": {
+    "scene.jpg": "Original download bytes unchanged; JPEG encoding confirmed with Pillow.",
+    "detail.png": {
+      "operation": "crop only, lossless PNG",
+      "box_pixels": [
+        880,
+        2050,
+        2650,
+        3020
+      ]
+    }
+  },
+  "files": {
+    "scene.jpg": "7deb5cafd1cf4aa088d41b9d4c4a6ccf94511cd4286b34bd9a44585e57360cc9",
+    "detail.png": "731533bd3103bb2363703ae0842c4d683bd529e5a13b68b7941f248faf3354e4"
+  },
+  "limitations": "One original photograph plus same-frame detail crop; no independent second-angle capture. Directional sunlight, wood texture and dark quiet space; not a manufacturing scene."
+}

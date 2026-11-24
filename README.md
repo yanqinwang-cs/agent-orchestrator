@@ -1,73 +1,55 @@
-# Agent Orchestrator
+# Agent Lab
 
-Agent Orchestrator is a local-first, inspectable harness for running reusable specialist agents through bounded workflows. It combines deterministic execution control, optional semantic decision routing, and pluggable harness-backed or direct-model worker runtimes.
+Agent Lab is a public venture/research project for defining and evaluating intelligent systems and the interfaces between their components. It aims to support controlled experiments, inspectable results, reproducible reruns, and a future benchmark/discovery surface.
 
-It is a personal open-source developer tool. Success means practical usefulness, user control, inspectability, reproducibility, flexibility and strong engineering quality.
+The research direction includes information selection, representation, recipients, retrieval, and execution scheduling. The guiding principle is to use the cheapest representation that preserves the information required for the downstream decision. Strong baselines and negative results matter.
 
-Milestones 1–3 are complete: typed configuration, deterministic run resolution, versioned JSON Schemas, the SQLite ledger, and an offline coordinator for all six shipped workflows using scripted fake workers. Milestone 4's controls and recovery implementation is present; focused offline fake-backend tests and static checks pass, but full acceptance remains unverified, including browser/client-closure behavior (there is no UI/API integration to exercise). The deterministic coordinator and ledger remain authoritative for workflow progression, policy, concurrency, retries, handoffs and persisted state. A bounded `DecisionEngine` is planned for milestone 5; it may return typed recommendations, while the coordinator validates and executes them.
+[AGENTS.md](AGENTS.md) is the sole project-level instruction and continuity authority.
 
-Codex is planned as the first real worker backend because it fits the existing subscription-backed workflow. The current runtime implements only the fake backend; it does not yet launch Codex, create project worktrees or provide a web UI. See the [implementation plan](docs/IMPLEMENTATION_PLAN.md) for target architecture, contracts and the ten-milestone roadmap, and the [integration audit](docs/INTEGRATION_AUDIT.md) for Codex evidence and integration limits.
+## Current implementation
+
+This checkout still contains the previous Agent Orchestrator implementation: typed workflow configuration, immutable snapshots, a SQLite ledger, filesystem artifacts, a deterministic workflow coordinator, fake execution/decision adapters, and a pinned Codex SDK adapter. A separate `agent_lab` backend now provides a curated, versioned discovery catalog, a local single-user composition workspace with immutable saved revisions and flexible scalar model settings, and a JSON API. Credential-like parameter names are rejected, but values are not secret-scanned; credentials must remain outside configurations. It does not implement the website UI, Agent Lab experiment definitions, datasets, benchmark evaluation/results, execution integration, Deep Agents, or AgentCore hosting.
+
+The preferred initial execution direction is Deep Agents, its LangChain/LangGraph primitives, and Amazon Bedrock AgentCore Runtime, behind replaceable adapters. Generic experiment records should remain independent of framework and provider types.
+
+The Python package and CLI retain the name `agent-orchestrator` until a later code migration. The CLI validates configuration; execution is exposed through Python APIs. The Codex adapter supports a bounded read-only report path with gated preflight and separate interruption/settlement evidence. Its broader effect-settlement guarantees remain incomplete. No live execution or deployment is established.
+
+The six shipped workflows and eleven specialist profiles are retained because the current configuration loader and tests require them. They are legacy fixtures, not the project's future task queue or prescribed experimental topology. Generated schemas likewise describe the current legacy contracts.
 
 ## Set up and validate
 
-Use Python 3.12+ and [uv](https://docs.astral.sh/uv/getting-started/installation/). SQLite comes with Python. The completed first three milestones need no Node, Codex sign-in or live model access.
-
-Install the locked development dependencies and validate the shipped configuration:
+Use Python 3.12+ and [uv](https://docs.astral.sh/uv/getting-started/installation/). SQLite is included with Python. Offline checks need no provider sign-in or AWS configuration.
 
 ```sh
 uv sync --locked --group dev
-uv run agent-orchestrator validate-config presets/agents.toml
-uv run agent-orchestrator validate-config presets/workflows/feature.toml
-uv run python scripts/export_schemas.py
-```
-
-Current checks:
-
-```sh
 uv run pytest -m 'not live'
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy src
+uv lock --check
 uv run agent-orchestrator --help
 uv run agent-orchestrator --version
 uv run agent-orchestrator validate-config config/project.example.toml
 ```
 
-With no subcommand, the CLI reports that run commands and the UI are not implemented. It does not start a placeholder dashboard. The default test suite uses only local fixtures and fake workers; live provider calls are not a test dependency.
+Live provider tests require explicit opt-in. See [development guidance](docs/DEVELOPMENT.md) for configuration validation, schema checks, and the boundary between local tooling and legacy runtime settings.
 
-## Package map
+## Local website sample
 
-| File | Purpose |
-|---|---|
-| `AGENTS.md` | Concise implementation instructions |
-| `.codex/config.toml` | Development sandbox and approval defaults |
-| `.env.example` | Planned app settings; contains no provider credentials |
-| `config/development.toml` | Six development execution presets |
-| `scripts/codex_task.py` | Portable preset launcher; `--dry-run` shows the exact invocation |
-| `config/project.example.toml`, `config/backends.toml` | Proposed typed application settings |
-| `presets/agents.toml`, `presets/workflows/*.toml` | Initial product agents and six workflows |
-| `docs/IMPLEMENTATION_PLAN.md` | Authoritative product contracts and milestone acceptance |
-| `docs/INTEGRATION_AUDIT.md` | Runtime choice, Codex integration and evidence boundaries |
-| `docs/DEVELOPMENT.md` | Development presets, skills and dependency policy |
-| `tasks/01-foundation.md` | Historical milestone 1 task specification |
-| `src/orchestrator/` | Versioned models, config validation, pure resolver, bounded execution coordinator, CLI, fake backend, SQLite ledger and artifact store |
-| `schemas/` | JSON Schemas generated from the Pydantic models |
-| `tests/` | Offline schema, resolver, validation, CLI and fake-backend tests |
+The bounded local website sample lives in [`website/`](website/README.md). It adds the frozen four-run invitation captures to a retained discovery design preview, not an implemented catalog or orchestration UI. The archive and image bytes remain unchanged; conclusions are personal and scoped to the supplied captures. Nothing is deployed.
 
-The application TOML files are schema-v1 product fixtures. `config/development.toml` remains a separate development preset catalog; it is loaded through its own model and never becomes product agent profiles.
+## Repository map
 
-Product `AgentProfile` records currently carry a default backend and model-binding alias. The v1 resolver can vary the model binding and effort within the profile's backend and workflow policy; selecting a different runtime requires the planned versioned execution-binding contract. Repository development presets remain Codex CLI instructions for working on this project and do not define product worker runtimes.
+| Path | Current role |
+| --- | --- |
+| `AGENTS.md` | Project intent, operating principles, and authority |
+| `docs/DEVELOPMENT.md` | Commands for the runnable legacy baseline |
+| `src/orchestrator/` | Existing legacy runtime, separate from the Agent Lab backend |
+| `src/agent_lab/` | Versioned catalog, SQLite composition persistence, and local JSON API |
+| `docs/DISCOVERY_COMPOSITION_BACKEND.md` | Backend contracts, API routes, local boundary, and focused test command |
+| `config/`, `presets/` | Configuration required by the current loader and regression suite |
+| `schemas/` | Generated schemas for existing legacy models |
+| `tests/` | Existing offline regressions and separately gated Codex live tests |
+| `scripts/` | Existing configuration/schema checks and an optional Codex development launcher |
 
-## Durable storage
-
-`SQLiteLedger` owns a versioned SQLite database with foreign keys, WAL mode, full synchronous commits and a configurable busy timeout. One revision-checked transaction writes projections, attributable events, command receipts, reservations and outbox intent together. Resolved run and attempt specifications and project configuration revisions are content-addressed immutable records. Schema v2 also preserves normalized worker results and completed stage outputs so joins and repair decisions can be reconstructed after reopen.
-
-`CoordinatorOwnership` combines an OS file lock with a persisted owner generation. `claim_next_outbox` marks an action claimed before any later dispatcher performs an external effect. A claimed action stays distinguishable from pending after restart and is not blindly selected again; reconciliation is a later milestone. `ArtifactStore` writes and hashes bytes under `runs/<run>/attempts/<attempt>/artifacts/`, atomically renames the completed file, then commits its manifest and event. A crash between rename and the SQLite commit can leave an unreferenced content-addressed file, but cannot publish a manifest for incomplete bytes.
-
-## Bounded fake execution
-
-`ExecutionCoordinator` advances only from the persisted resolved run, stage projections, attempt lineage and durable reservations. It uses stable workflow and slot order, frozen fixed/select-one/elastic selections, the frozen workflow policy, and global/project/run/stage reservations. Attempt specifications, capacity reservations and launch intents commit together. Dispatch claims the outbox action before calling the backend, then records acknowledgement separately. Known classified failures may retry within both workflow and profile limits; unknown launch ownership keeps its reservations and is never replayed automatically.
-
-The scripted `FakeBackend` can hold start acknowledgements and worker events on explicit barriers. Its manual clock supports deterministic timeout tests. The end-to-end suite drives Review, Prototype, Feature, Debug, Research and Final handoff offline, including both Feature branches.
-
-The normalized worker envelope currently contains output names, schema IDs, hashes and a summary, but no report or patch bytes and no registry of stage-specific body schemas. The coordinator checks envelope identity, input/workspace revisions, required output names, hash shape and safe relative paths. It cannot inspect report sections or verify that a summary labels limitations or unresolved claims. Typed payload contracts and content validation are planned before real write workflows.
+Git history preserves obsolete plans and research.

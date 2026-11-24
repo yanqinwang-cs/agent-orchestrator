@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "decision_id": "11111111-1111-4111-8111-111111111111",
+  "effective_inference": {
+    "schema_version": 1,
+    "mechanism": "deterministic_policy",
+    "deterministic_policy_id": "first_allowed_outcome",
+    "deterministic_policy_revision": "1",
+    "deterministic_rule": "first_allowed"
+  },
+  "consumed_run_revision": 4,
+  "consumed_evidence_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "outcome_id": "prototype-implementer",
+  "adapter_result_id": "first_allowed_outcome:1"
+}
