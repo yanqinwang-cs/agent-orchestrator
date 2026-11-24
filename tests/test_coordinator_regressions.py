@@ -7,13 +7,15 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
 from test_execution_coordinator import (
+    STAMP,
     _coordinator,
     _create_run,
     _worker_script,
     ledger_owner,  # noqa: F401  (fixture)
 )
 
-from orchestrator.backends.fake import AttemptScript, ScriptedFailure
+from orchestrator.backends.fake import AttemptScript, FakeBackend, FakeClock, ScriptedFailure
+from orchestrator.execution import ExecutionCoordinator
 from orchestrator.domain.backend import Reconciliation, WorkerDisconnectedEvent, WorkerFailureEvent
 from orchestrator.domain.models import (
     AttemptStatus,
@@ -203,3 +205,58 @@ _KINDS = {
     ResumeIntervention: InterventionKind.RESUME,
     StopIntervention: InterventionKind.STOP,
 }
+
+
+class _PreflightRaises(FakeBackend):
+    async def preflight(self, spec, context=None):
+        raise ConnectionError("backend unreachable during preflight")
+
+
+@pytest.mark.asyncio
+async def test_exception_from_preflight_is_a_known_failure_that_releases_reservations(
+    app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "review", "r7")
+    clock = FakeClock(origin=STAMP)
+    backend = _PreflightRaises(backend_id="codex", script_factory=_worker_script, clock=clock)
+    coordinator = ExecutionCoordinator(ledger, backend, ownership, clock=clock)
+    coordinator.advance("r7")
+    coordinator.advance("r7")
+
+    await coordinator.dispatch_pending("r7")
+
+    attempt = ledger.list_attempts("r7")[0]
+    assert backend.start_calls == []
+    assert attempt.state.status is AttemptStatus.FAILED
+    assert not any(item.status.value == "held" for item in ledger.list_reservations("r7"))
+
+
+@pytest.mark.asyncio
+async def test_stop_during_start_survives_the_late_launch_acknowledgement(
+    app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "review", "r4")
+    coordinator, backend, _clock = _coordinator(
+        ledger,
+        ownership,
+        factory=lambda spec: AttemptScript(events=_worker_script(spec).events, start_barrier=True),
+    )
+    coordinator.advance("r4")
+    coordinator.advance("r4")
+    dispatch = asyncio.create_task(coordinator.dispatch_pending("r4"))
+    attempt_id = ledger.list_attempts("r4")[0].spec.attempt_id
+    await asyncio.wait_for(backend.wait_until_start_waiting(attempt_id), 5)
+
+    await coordinator.apply_intervention(_control(StopIntervention, ledger, "r4"))
+    run = ledger.get_run("r4")
+    assert run.state.status is RunStatus.ATTENTION_REQUIRED
+    assert run.state.resume_status is RunStatus.STOPPING
+    assert ledger.get_attempt(attempt_id).state.status is AttemptStatus.OUTCOME_UNKNOWN
+
+    backend.release_start(attempt_id)
+    await asyncio.wait_for(dispatch, 5)
+
+    # The late acknowledgement must not turn the ambiguous attempt back into a running one.
+    assert ledger.get_attempt(attempt_id).state.status is not AttemptStatus.RUNNING

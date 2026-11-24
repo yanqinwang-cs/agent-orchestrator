@@ -489,10 +489,23 @@ class ExecutionCoordinator:
             if self._requires_backend_preflight_record():
                 attempt = self._ensure_backend_preparation_intent(action, attempt)
             context = self._preflight_context(action, attempt)
-            preflight = await asyncio.wait_for(
-                self.backend.preflight(attempt.spec, context),
-                timeout=self.preflight_timeout_seconds,
-            )
+            try:
+                preflight = await asyncio.wait_for(
+                    self.backend.preflight(attempt.spec, context),
+                    timeout=self.preflight_timeout_seconds,
+                )
+            except (KnownPrelaunchFailure, asyncio.CancelledError):
+                raise
+            except Exception as error:
+                # start() has not been called, so without a prepared owner to clean up
+                # the launch is known not to have happened.
+                if self._requires_backend_preflight_record():
+                    raise
+                raise KnownPrelaunchFailure(
+                    FailureClass.PROVIDER_TRANSIENT,
+                    f"backend preflight failed: {type(error).__name__}",
+                    safe_to_retry=True,
+                ) from error
             preflight_record = None
             if preflight.snapshot is not None:
                 if preflight.snapshot.preparation_id != context.preparation_id:
@@ -1837,6 +1850,7 @@ class ExecutionCoordinator:
         deliveries: list[ControlDelivery] = []
         stage_redirects: list[StageRedirect] = []
         timeout_event: Event | None = None
+        attention_resume: RunStatus | None = None
 
         if isinstance(normalized, PauseIntervention):
             run_status = (
@@ -1874,6 +1888,7 @@ class ExecutionCoordinator:
                         )
                     )
                     run_status = RunStatus.ATTENTION_REQUIRED
+                    attention_resume = RunStatus.STOPPING
                     reason = "stop requested but worker launch ownership is unresolved"
         elif isinstance(normalized, StopAttemptIntervention):
             target = self.ledger.get_attempt(normalized.attempt_id)
@@ -2002,7 +2017,7 @@ class ExecutionCoordinator:
                         reason if run_status == RunStatus.ATTENTION_REQUIRED else None
                     ),
                     resume_status=(
-                        run.state.resume_status or run.state.status
+                        attention_resume or run.state.resume_status or run.state.status
                         if run_status == RunStatus.ATTENTION_REQUIRED
                         else None
                     ),
@@ -3252,9 +3267,15 @@ class ExecutionCoordinator:
         def build(run: PersistedRun) -> LedgerMutation:
             current = self.ledger.get_attempt(attempt.spec.attempt_id)
             started = self._now()
+            # A stop that raced this start already marked the attempt outcome-unknown;
+            # keep it so, but record the handle so the worker can still be reconciled.
             running = current.state.model_copy(
                 update={
-                    "status": AttemptStatus.RUNNING,
+                    "status": (
+                        AttemptStatus.RUNNING
+                        if current.state.status == AttemptStatus.LAUNCHING
+                        else current.state.status
+                    ),
                     "started_at": started,
                     "receipt_id": handle.handle_id,
                     "worker_handle_id": handle.handle_id,
