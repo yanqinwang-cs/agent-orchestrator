@@ -1319,6 +1319,14 @@ class CodexBackend:
             self._ensure_event_queue(prepared, response)
             return prepared.prepared_handle.model_copy(update={"turn_id": turn_id})
         except _SdkDeadlineExceeded as error:
+            if prepared.turn_task is None:
+                # No turn request was created yet, so nothing was submitted.
+                await self._settle_owner(prepared)
+                raise KnownPrelaunchFailure(
+                    FailureClass.PROVIDER_TRANSIENT,
+                    "Codex timed out before the turn was sent",
+                    safe_to_retry=True,
+                ) from error
             # The request may have been delivered. Force bounded owner shutdown,
             # then preserve outcome_unknown in the coordinator; never replay.
             await self._settle_owner(prepared)
@@ -2029,7 +2037,8 @@ class CodexBackend:
                 return
             if identity_matches:
                 delta = getattr(payload, "delta", None)
-                if isinstance(delta, str):
+                # Reasoning and command-output deltas are not part of the report.
+                if isinstance(delta, str) and method == "item/agentMessage/delta":
                     raw = delta.encode("utf-8")
                     available = max(0, _MAX_DELTA_BYTES - len(prepared.deltas))
                     prepared.deltas.extend(raw[:available])
@@ -2055,6 +2064,10 @@ class CodexBackend:
             prepared.closed = True
             if prepared.notification_pump is not None and not prepared.notification_pump.done():
                 prepared.notification_pump.cancel()
+                if prepared.terminal_event is None:
+                    # The cancelled pump can no longer end the stream, so a reader
+                    # blocked on the queue needs an explicit end marker.
+                    prepared.event_queue.put_nowait(("error", "closed"))
             try:
                 await asyncio.wait_for(
                     asyncio.shield(
@@ -2062,7 +2075,7 @@ class CodexBackend:
                     ),
                     timeout=max(1.0, float(self.settings.shutdown_grace_seconds) + 1.0),
                 )
-            except BaseException:
+            except Exception:
                 pass
             client_closed = prepared.client is None
             client_close_error: str | None = None
@@ -2076,7 +2089,7 @@ class CodexBackend:
                         timeout=max(1.0, float(self.settings.shutdown_grace_seconds)),
                     )
                     client_closed = True
-                except BaseException as error:
+                except Exception as error:
                     client_closed = False
                     client_close_error = type(error).__name__
             try:
@@ -2097,7 +2110,7 @@ class CodexBackend:
                                 "settled",
                             )
                         }
-                    except BaseException as error:
+                    except Exception as error:
                         status_facts = f"unavailable:{type(error).__name__}"
                     prepared.shutdown_receipt = ShutdownReceipt(
                         settled=False,
@@ -2135,7 +2148,7 @@ class CodexBackend:
                     ),
                 )
                 return settled
-            except BaseException:
+            except Exception:
                 prepared.shutdown_receipt = ShutdownReceipt(
                     settled=False, detail="independent Codex owner settlement failed"
                 )
@@ -2290,14 +2303,17 @@ class CodexBackend:
         if status != "completed":
             return status, b""
         final_text: str | None = None
-        for item in reversed(getattr(turn, "items", ())):
+        for wrapper in getattr(turn, "items", ()):
+            # SDK turn items are union wrapper models; the concrete item is under `root`.
+            item = getattr(wrapper, "root", wrapper)
             item_kind = getattr(item, "type", None)
+            item_kind = getattr(item_kind, "value", item_kind)
             if item_kind in {"mcpToolCall", "dynamicToolCall", "subAgentActivity"}:
                 return "malformed", b""
             if item_kind == "agentMessage":
-                final_text = getattr(item, "text", None)
-                if final_text is not None:
-                    break
+                text = getattr(item, "text", None)
+                if text is not None:
+                    final_text = text
         raw_output = (
             final_text.encode("utf-8") if isinstance(final_text, str) else bytes(prepared.deltas)
         )
