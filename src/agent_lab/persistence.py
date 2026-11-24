@@ -9,6 +9,7 @@ import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -171,6 +172,21 @@ def _version_digest(resource_id: str, version: str, body: str, metadata: dict[st
             "metadata": metadata,
         }
     )
+
+
+def _verified_version_digest(row: Any) -> str:
+    """Return the stored digest only when the stored body still hashes to it."""
+    try:
+        expected = _version_digest(
+            row["resource_id"], row["version"], row["body"], json.loads(row["metadata_json"])
+        )
+    except ValueError:
+        expected = ""
+    if expected != row["digest"]:
+        raise PersistenceIntegrityError(
+            f"Catalog version {row['resource_id']}@{row['version']} failed digest verification."
+        )
+    return expected
 
 
 def _composition_digest(
@@ -502,7 +518,8 @@ class SQLiteStore:
             if _binding_snapshots is None:
                 for target, ordinal, resource_id, version in bindings:
                     row = connection.execute(
-                        """SELECT d.id, d.kind, d.name, v.version, v.digest
+                        """SELECT d.id, d.kind, d.name, v.resource_id, v.version, v.digest,
+                                  v.body, v.metadata_json
                            FROM catalog_definitions AS d
                            JOIN catalog_versions AS v ON v.resource_id = d.id
                            WHERE d.id = ? AND v.version = ?""",
@@ -520,7 +537,7 @@ class SQLiteStore:
                             ordinal=ordinal,
                             resource_id=row["id"],
                             version=row["version"],
-                            digest=row["digest"],
+                            digest=_verified_version_digest(row),
                             name=row["name"],
                             kind=row["kind"],
                         )
@@ -712,7 +729,8 @@ class SQLiteStore:
         binding_rows = connection.execute(
             """SELECT b.binding_target, b.binding_ordinal, b.resource_id,
                       b.resource_version, b.resource_name,
-                      b.resource_kind, b.version_digest, v.digest AS actual_digest
+                      b.resource_kind, b.version_digest, v.digest AS actual_digest,
+                      v.body, v.metadata_json
                FROM composition_bindings AS b
                JOIN catalog_versions AS v
                  ON v.resource_id = b.resource_id AND v.version = b.resource_version
@@ -720,6 +738,16 @@ class SQLiteStore:
                ORDER BY b.binding_ordinal""",
             (row["composition_id"], row["revision"]),
         ).fetchall()
+        for item in binding_rows:
+            _verified_version_digest(
+                {
+                    "resource_id": item["resource_id"],
+                    "version": item["resource_version"],
+                    "body": item["body"],
+                    "metadata_json": item["metadata_json"],
+                    "digest": item["actual_digest"],
+                }
+            )
         if any(item["version_digest"] != item["actual_digest"] for item in binding_rows):
             raise PersistenceIntegrityError(
                 f"Composition {row['composition_id']} revision {row['revision']} "
