@@ -559,7 +559,7 @@ class ExecutionCoordinator:
                     try:
                         cleanup = await asyncio.wait_for(
                             self.backend.close(preflight.prepared_handle),
-                            timeout=self._shutdown_grace_seconds(),
+                            timeout=self._close_budget_seconds(),
                         )
                     except Exception as error:
                         self._mark_unknown_launch(
@@ -587,7 +587,7 @@ class ExecutionCoordinator:
                 if preflight.prepared_handle is not None:
                     cleanup = await asyncio.wait_for(
                         self.backend.close(preflight.prepared_handle),
-                        timeout=self._shutdown_grace_seconds(),
+                        timeout=self._close_budget_seconds(),
                     )
                     if not cleanup.settled:
                         self._mark_unknown_launch(
@@ -659,7 +659,7 @@ class ExecutionCoordinator:
                 try:
                     cleanup = await asyncio.wait_for(
                         self.backend.close(preflight.prepared_handle),
-                        timeout=self._shutdown_grace_seconds(),
+                        timeout=self._close_budget_seconds(),
                     )
                 except Exception as cleanup_error:
                     self._mark_unknown_launch(
@@ -721,6 +721,11 @@ class ExecutionCoordinator:
         settings = getattr(self.backend, "settings", None)
         configured = getattr(settings, "shutdown_grace_seconds", None)
         return float(configured if configured is not None else self.control_timeout_seconds)
+
+    def _close_budget_seconds(self) -> float:
+        # A backend's close() may legitimately take several grace periods to settle its owner.
+        budget = getattr(self.backend, "close_budget_seconds", None)
+        return float(budget if budget is not None else self._shutdown_grace_seconds())
 
     def _requires_backend_preflight_record(self) -> bool:
         return bool(getattr(self.backend, "requires_preflight_record", False))
@@ -927,12 +932,7 @@ class ExecutionCoordinator:
                 expected_revision=run.state.revision,
                 actor=self.actor,
                 occurred_at=self._now(),
-                run_update=RunProjectionUpdate(
-                    status=next_status,
-                    elapsed_seconds=self._elapsed(run),
-                    attention_reason=None,
-                    resume_status=None,
-                ),
+                run_update=self._settlement_run_update(run, next_status),
                 attempt_updates=(cancelled,),
                 outbox_outcomes=(
                     OutboxOutcomeChange(
@@ -989,7 +989,15 @@ class ExecutionCoordinator:
                     )
                     await self._finalize_decision(run_id, prior, failure)
                     return True
-                continue
+                # A verdict that went stale (the run moved while the engine answered) is not
+                # a decision; without a redirect the stage can never start, so ask again.
+                stale = (
+                    prior.disposition is not None
+                    and prior.disposition.reason == DecisionDispositionReason.STALE_RUN_REVISION
+                    and self.ledger.get_stage_redirect(run_id, question.stage_id) is None
+                )
+                if not stale:
+                    continue
 
             # An explicit run-level profile selection is already coordinator input.
             if any(
@@ -2197,7 +2205,7 @@ class ExecutionCoordinator:
                 raise ValueError("failure is not marked safe to retry")
             if not run.spec.workflow.policy.allow_retry:
                 raise ValueError("workflow policy forbids retry")
-            if len(lineage) >= min(
+            if self._used_attempts(lineage) >= min(
                 profile.retry_policy.max_attempts, run.spec.workflow.max_attempts_per_slot
             ):
                 raise ValueError("retry budget is exhausted")
@@ -2696,6 +2704,11 @@ class ExecutionCoordinator:
                 next_status = RunStatus.ATTENTION_REQUIRED
                 next_attention = attention_reason
                 next_resume = run.state.resume_status or run.state.status
+            if run.state.status in {RunStatus.SUCCEEDED, RunStatus.FAILED}:
+                # A sibling already ended the run; a late delivery outcome cannot reopen it.
+                next_status = run.state.status
+                next_attention = run.state.attention_reason
+                next_resume = run.state.resume_status
 
             event_kind = {
                 ControlDeliveryStatus.DELIVERING: EventKind.INTERVENTION_DELIVERY_ATTEMPTED,
@@ -3529,8 +3542,7 @@ class ExecutionCoordinator:
     ) -> bool:
         previous = lineage[-1]
         policy = self._profile(run, profile_id).retry_policy
-        # An attempt cancelled before any worker started spends no retry budget.
-        used = sum(1 for item in lineage if not self._never_launched(item))
+        used = self._used_attempts(lineage)
         return (
             run.spec.workflow.policy.allow_retry
             and previous.state.status
@@ -3545,6 +3557,11 @@ class ExecutionCoordinator:
                 previous.state.status != AttemptStatus.CANCELLED or previous.state.retry_authorized
             )
         )
+
+    @classmethod
+    def _used_attempts(cls, lineage: Sequence[PersistedAttempt]) -> int:
+        # An attempt cancelled before any worker started spends no retry budget.
+        return sum(1 for item in lineage if not cls._never_launched(item))
 
     @staticmethod
     def _never_launched(attempt: PersistedAttempt) -> bool:

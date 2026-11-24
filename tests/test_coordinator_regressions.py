@@ -8,12 +8,15 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 import pytest
 from test_execution_coordinator import (
     STAMP,
+    _complete_plan_before_decision,
     _coordinator,
     _create_run,
+    _decision_result,
     _worker_script,
 )
 
 from orchestrator.backends.fake import AttemptScript, FakeBackend, FakeClock, ScriptedFailure
+from orchestrator.backends.fake_decision import DecisionBarrier, FakeDecisionEngine
 from orchestrator.domain.backend import Reconciliation, WorkerDisconnectedEvent, WorkerFailureEvent
 from orchestrator.domain.models import (
     AttemptStatus,
@@ -315,3 +318,74 @@ async def test_retry_on_a_paused_run_does_not_lift_the_pause(app_config, ledger_
 
     assert ledger.get_run("r5").state.status is RunStatus.PAUSED
     assert len(backend.start_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_decision_gone_stale_while_pausing_is_asked_again_after_resume(
+    app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "prototype", "p")
+    _complete_plan_before_decision(ledger, "p")
+    barrier = DecisionBarrier()
+    engine = FakeDecisionEngine(
+        (
+            lambda request: _decision_result(request, outcome_id="implementer"),
+            lambda request: _decision_result(request, outcome_id="implementer"),
+        ),
+        barrier=barrier,
+    )
+    coordinator, _, _ = _coordinator(
+        ledger, ownership, factory=_worker_script, decision_engine=engine
+    )
+    task = asyncio.create_task(asyncio.wait_for(coordinator.run_until_stalled("p"), 5))
+    await asyncio.wait_for(barrier.entered.wait(), 5)
+    await coordinator.apply_intervention(
+        PauseIntervention(
+            command_id=uuid4(),
+            actor="user",
+            target="p",
+            expected_run_revision=ledger.get_run("p").state.revision,
+            kind=InterventionKind.PAUSE,
+            run_id="p",
+        )
+    )
+    barrier.release.set()
+    await task
+    assert ledger.get_run("p").state.status == RunStatus.PAUSED
+    assert ledger.get_stage_redirect("p", "implement") is None
+
+    await coordinator.apply_intervention(
+        ResumeIntervention(
+            command_id=uuid4(),
+            actor="user",
+            target="p",
+            expected_run_revision=ledger.get_run("p").state.revision,
+            kind=InterventionKind.RESUME,
+            run_id="p",
+        )
+    )
+    await asyncio.wait_for(coordinator.run_until_stalled("p"), 5)
+
+    assert len(engine.requests) == 2
+    assert ledger.get_stage_redirect("p", "implement") == "implementer"
+
+
+@pytest.mark.asyncio
+async def test_cancelling_an_unlaunched_attempt_keeps_the_attention_hold(
+    app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "review", "r8")
+    coordinator, _backend, _clock = _coordinator(ledger, ownership, factory=_worker_script)
+    coordinator.advance("r8")
+    coordinator.advance("r8")  # attempt admitted: launching, launch intent still pending
+    coordinator._set_run_status(ledger.get_run("r8"), RunStatus.ATTENTION_REQUIRED, "operator hold")
+
+    await coordinator.dispatch_pending("r8")
+
+    run = ledger.get_run("r8")
+    assert ledger.list_attempts("r8")[0].state.status is AttemptStatus.CANCELLED
+    assert run.state.status is RunStatus.ATTENTION_REQUIRED
+    assert run.state.attention_reason == "operator hold"
+    assert run.state.resume_status is not None

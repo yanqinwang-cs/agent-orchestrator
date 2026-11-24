@@ -437,14 +437,7 @@ class SQLiteStore:
         try:
             for row in rows:
                 metadata = json.loads(row["metadata_json"])
-                expected_digest = _version_digest(
-                    row["resource_id"], row["version"], row["body"], metadata
-                )
-                if expected_digest != row["digest"]:
-                    raise PersistenceIntegrityError(
-                        f"Catalog version {row['resource_id']}@{row['version']} "
-                        "failed digest verification."
-                    )
+                _verified_version_digest(row)
                 versions_list.append(
                     ResourceVersion(
                         resource_id=row["resource_id"],

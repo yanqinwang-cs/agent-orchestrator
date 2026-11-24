@@ -234,6 +234,27 @@ def test_verified_revision_requires_the_stage_names_the_engine_reads(app_config)
         _validate_feature(app_config, feature.model_copy(update={"stages": renamed}))
 
 
+def test_repair_gate_name_is_enforced_in_any_workflow_that_has_one(app_config) -> None:
+    feature = next(item for item in app_config.workflows if item.id == "feature")
+    renamed = [
+        stage.model_copy(
+            update={
+                "id": "decide" if stage.id == "repair_gate" else stage.id,
+                "depends_on": [
+                    "decide" if item == "repair_gate" else item for item in stage.depends_on
+                ],
+            }
+        )
+        for stage in feature.stages
+    ]
+    workflow = feature.model_copy(
+        update={"stages": renamed, "completion": WorkflowCompletion.REPORTS_PRESENT}
+    )
+
+    with pytest.raises(ConfigValidationError, match="stage must be named 'repair_gate'"):
+        _validate_feature(app_config, workflow)
+
+
 def test_repair_branch_must_declare_a_revision_output(app_config) -> None:
     feature = next(item for item in app_config.workflows if item.id == "feature")
     branches = {name: dict(outputs) for name, outputs in feature.branch_outputs.items()}

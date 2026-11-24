@@ -345,8 +345,10 @@ def _read_version(connection: sqlite3.Connection) -> int:
 
 
 def apply_migrations(connection: sqlite3.Connection) -> int:
-    _read_version(connection)
+    seen = _read_version(connection)
     for version, name, migration in MIGRATIONS:
+        if version <= seen:
+            continue
         connection.execute("BEGIN EXCLUSIVE")
         try:
             # Re-read under the lock: a concurrent opener may have applied this

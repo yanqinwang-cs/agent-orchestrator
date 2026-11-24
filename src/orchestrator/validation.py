@@ -556,6 +556,15 @@ def _validate_workflow(
                 ValidationIssue(f"{base}.stages", "repair branches require a repair_gate")
             )
 
+    repair_gates = [item for item in workflow.stages if item.kind == StageKind.REPAIR_GATE]
+    if repair_gates and workflow.completion != WorkflowCompletion.VERIFIED_REVISION:
+        # The coordinator reads these stage names in any workflow that has a repair gate.
+        if any(item.id != "repair_gate" for item in repair_gates):
+            issues.append(ValidationIssue(base, "stage must be named 'repair_gate'"))
+        for fixed_id in ("review", "test"):
+            if fixed_id not in stages:
+                issues.append(ValidationIssue(base, f"stage must be named {fixed_id!r}"))
+
     _validate_required_paths(workflow, profiles, stages, ancestry, branches, issues)
 
 

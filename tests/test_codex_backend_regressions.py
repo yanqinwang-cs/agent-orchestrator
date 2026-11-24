@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import time
 from types import SimpleNamespace
 
@@ -84,7 +85,10 @@ async def test_wrapped_sdk_items_do_not_pull_stream_deltas_into_the_report(lifec
 
     events = await _drain(lifecycle, handle)
 
-    assert isinstance(events[-1], WorkerTerminalEvent)
+    terminal = events[-1]
+    assert isinstance(terminal, WorkerTerminalEvent)
+    assert terminal.result.summary == "No blocking issues were found."
+    assert terminal.result.artifacts[0].content_hash == hashlib.sha256(REPORT).hexdigest()
 
 
 @pytest.mark.asyncio
@@ -107,7 +111,10 @@ async def test_report_is_rebuilt_from_agent_message_deltas_only(lifecycle) -> No
 
     events = await _drain(lifecycle, handle)
 
-    assert isinstance(events[-1], WorkerTerminalEvent)
+    terminal = events[-1]
+    assert isinstance(terminal, WorkerTerminalEvent)
+    assert terminal.result.summary == "No blocking issues were found."
+    assert terminal.result.artifacts[0].content_hash == hashlib.sha256(REPORT).hexdigest()
 
 
 @pytest.mark.asyncio
@@ -201,3 +208,15 @@ async def test_timeout_before_the_turn_is_sent_is_a_known_prelaunch_failure(
         )
 
     assert client.turn_count == 0
+
+
+def test_coordinator_waits_for_close_as_long_as_the_owner_settle_can_take(lifecycle) -> None:
+    from orchestrator.execution import ExecutionCoordinator
+
+    grace = lifecycle.backend.settings.shutdown_grace_seconds
+    coordinator = object.__new__(ExecutionCoordinator)
+    coordinator.backend = lifecycle.backend
+    coordinator.control_timeout_seconds = grace
+
+    # terminate-child, client close and owner settle each wait one grace period.
+    assert coordinator._close_budget_seconds() >= 3 * grace

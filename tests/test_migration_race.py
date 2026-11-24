@@ -71,3 +71,15 @@ def test_ledger_closes_its_connection_when_pragma_setup_fails(tmp_path, monkeypa
     with pytest.raises(sqlite3.OperationalError):
         SQLiteLedger(tmp_path / "x.sqlite3")
     assert opened[0].closed  # type: ignore[attr-defined]
+
+
+def test_current_database_opens_without_taking_the_write_lock(tmp_path) -> None:
+    path = tmp_path / "ledger.sqlite3"
+    apply_migrations(sqlite3.connect(path, isolation_level=None))
+    holder = sqlite3.connect(path, isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    try:
+        opener = sqlite3.connect(path, isolation_level=None, timeout=0.05)
+        assert apply_migrations(opener) == CURRENT_SCHEMA_VERSION
+    finally:
+        holder.execute("ROLLBACK")

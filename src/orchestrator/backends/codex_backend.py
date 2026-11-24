@@ -365,6 +365,12 @@ class CodexBackend:
 
     requires_preflight_record = True
 
+    @property
+    def close_budget_seconds(self) -> float:
+        """Upper bound on close(): the sum of the waits in _settle_owner, plus one second slack."""
+        grace = float(self.settings.shutdown_grace_seconds)
+        return max(1.0, grace + 1.0) + max(1.0, grace) + max(0.1, grace) + 1.0 + 1.0
+
     def __init__(
         self,
         settings: CodexBackendSettings,
