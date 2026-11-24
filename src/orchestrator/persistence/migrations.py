@@ -334,19 +334,26 @@ MIGRATIONS: tuple[Migration, ...] = (
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 
-def apply_migrations(connection: sqlite3.Connection) -> int:
-    current_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-    if current_version > CURRENT_SCHEMA_VERSION:
+def _read_version(connection: sqlite3.Connection) -> int:
+    version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+    if version > CURRENT_SCHEMA_VERSION:
         raise ValueError(
-            f"database schema version {current_version} is newer than supported "
+            f"database schema version {version} is newer than supported "
             f"version {CURRENT_SCHEMA_VERSION}"
         )
+    return version
 
+
+def apply_migrations(connection: sqlite3.Connection) -> int:
+    _read_version(connection)
     for version, name, migration in MIGRATIONS:
-        if version <= current_version:
-            continue
         connection.execute("BEGIN EXCLUSIVE")
         try:
+            # Re-read under the lock: a concurrent opener may have applied this
+            # migration between the unlocked read and the lock.
+            if version <= _read_version(connection):
+                connection.rollback()
+                continue
             migration(connection)
             applied_at = datetime.now(UTC).isoformat()
             connection.execute(

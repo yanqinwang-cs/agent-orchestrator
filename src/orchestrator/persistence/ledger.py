@@ -156,18 +156,19 @@ class SQLiteLedger:
             isolation_level=None,
             check_same_thread=False,
         )
-        self._connection.row_factory = sqlite3.Row
-        self._connection.execute("PRAGMA foreign_keys = ON")
-        self._connection.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
-        if self.path != ":memory:":
-            self._connection.execute("PRAGMA journal_mode = WAL")
-            self._connection.execute("PRAGMA synchronous = FULL")
         self._mutex = RLock()
         self._closed = False
         try:
+            self._connection.row_factory = sqlite3.Row
+            self._connection.execute("PRAGMA foreign_keys = ON")
+            self._connection.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
+            if self.path != ":memory:":
+                self._connection.execute("PRAGMA journal_mode = WAL")
+                self._connection.execute("PRAGMA synchronous = FULL")
             apply_migrations(self._connection)
         except ValueError as error:
             self._connection.close()
+            self._closed = True
             if "newer than supported" in str(error):
                 raise UnsupportedSchemaVersion(str(error)) from error
             raise
