@@ -713,9 +713,7 @@ def _validate_required_paths(
             for branch in (Condition.REPAIR_NEEDED.value, Condition.REPAIR_NOT_NEEDED.value):
                 if "revision" not in branches.get(branch, {}):
                     issues.append(
-                        ValidationIssue(
-                            f"{base}.{branch}", "branch must declare a revision output"
-                        )
+                        ValidationIssue(f"{base}.{branch}", "branch must declare a revision output")
                     )
         elif "integrate" not in stages and "integration_check" not in stages:
             issues.append(ValidationIssue(base, "stage must be named 'integrate'"))

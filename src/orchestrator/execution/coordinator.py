@@ -1941,7 +1941,13 @@ class ExecutionCoordinator:
         elif isinstance(normalized, RetryIntervention):
             target = self.ledger.get_attempt(normalized.attempt_id)
             attempt_updates.append(target.state.model_copy(update={"retry_authorized": True}))
-            run_status = run.state.resume_status or RunStatus.RUNNING
+            # Retry authorizes an attempt; only an attention hold is lifted by it. A pause
+            # or stop stays in force until Resume, which runs its own recovery checks.
+            run_status = (
+                run.state.resume_status or RunStatus.RUNNING
+                if run.state.status == RunStatus.ATTENTION_REQUIRED
+                else run.state.status
+            )
             reason = "explicit retry authorized"
         elif isinstance(normalized, RedirectIntervention):
             stage_redirects.append(

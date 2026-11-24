@@ -1253,9 +1253,7 @@ def test_failed_run_cannot_move_back_to_running(tmp_path, app_config) -> None:
         assert ledger.get_run("run-1").state.status is RunStatus.FAILED
 
 
-def test_failed_artifact_publish_keeps_a_file_another_manifest_uses(
-    tmp_path, app_config
-) -> None:
+def test_failed_artifact_publish_keeps_a_file_another_manifest_uses(tmp_path, app_config) -> None:
     content = b"identical report bytes\n"
     with SQLiteLedger(tmp_path / "db.sqlite3") as ledger:
         _, run_spec = _create_run(ledger, app_config)

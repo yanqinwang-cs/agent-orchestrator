@@ -258,14 +258,17 @@ def test_verified_research_requires_a_stage_named_verify(app_config) -> None:
 
     with pytest.raises(ConfigValidationError, match="stage must be named 'verify'"):
         _validate_feature(
-            app_config, research.model_copy(update={"stages": renamed, "required_outputs": required})
+            app_config,
+            research.model_copy(update={"stages": renamed, "required_outputs": required}),
         )
 
 
 def test_duplicate_profile_in_a_redirect_is_rejected(app_config) -> None:
     prototype = next(item for item in app_config.workflows if item.id == "prototype")
     redirects = [
-        item.model_copy(update={"allowed_profiles": [*item.allowed_profiles, item.allowed_profiles[0]]})
+        item.model_copy(
+            update={"allowed_profiles": [*item.allowed_profiles, item.allowed_profiles[0]]}
+        )
         for item in prototype.allowed_redirects
     ]
 
@@ -283,6 +286,8 @@ def test_overlay_path_settings_are_rejected_until_loading_exists(app_config) -> 
         validate_application(app_config.agents, app_config.workflows, app_config.backends, project)
 
     profile = app_config.agents.agents[0].model_copy(update={"overlay_paths": ["x.toml"]})
-    catalog = app_config.agents.model_copy(update={"agents": [profile, *app_config.agents.agents[1:]]})
+    catalog = app_config.agents.model_copy(
+        update={"agents": [profile, *app_config.agents.agents[1:]]}
+    )
     with pytest.raises(ConfigValidationError, match=r"agents\..*overlay_paths"):
         validate_application(catalog, app_config.workflows, app_config.backends, app_config.project)

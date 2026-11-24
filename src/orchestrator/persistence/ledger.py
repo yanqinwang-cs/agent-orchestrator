@@ -1698,8 +1698,7 @@ class SQLiteLedger:
             or row["released_at"] is not None
         ):
             raise OwnerSuperseded(
-                f"coordinator owner {lease.owner_id} generation {lease.generation} "
-                "was superseded"
+                f"coordinator owner {lease.owner_id} generation {lease.generation} was superseded"
             )
 
     def _release_owner(self, lease: OwnerLease, released_at: datetime) -> None:

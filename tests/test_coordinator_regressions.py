@@ -11,11 +11,9 @@ from test_execution_coordinator import (
     _coordinator,
     _create_run,
     _worker_script,
-    ledger_owner,  # noqa: F401  (fixture)
 )
 
 from orchestrator.backends.fake import AttemptScript, FakeBackend, FakeClock, ScriptedFailure
-from orchestrator.execution import ExecutionCoordinator
 from orchestrator.domain.backend import Reconciliation, WorkerDisconnectedEvent, WorkerFailureEvent
 from orchestrator.domain.models import (
     AttemptStatus,
@@ -23,9 +21,22 @@ from orchestrator.domain.models import (
     InterventionKind,
     PauseIntervention,
     ResumeIntervention,
+    RetryIntervention,
     RunStatus,
     StopIntervention,
 )
+from orchestrator.execution import ExecutionCoordinator
+from orchestrator.persistence import CoordinatorOwnership, SQLiteLedger
+
+
+@pytest.fixture
+def ledger_owner(tmp_path):
+    ledger = SQLiteLedger(tmp_path / "ledger.sqlite3")
+    ownership = CoordinatorOwnership(ledger, tmp_path / "coordinator.lock")
+    ownership.acquire("test-owner", STAMP)
+    yield ledger, ownership
+    ownership.release(STAMP)
+    ledger.close()
 
 
 async def _settle_loop(turns: int = 20) -> None:
@@ -42,9 +53,7 @@ async def test_clock_tick_before_deadline_keeps_the_worker_event_stream(
     coordinator, backend, clock = _coordinator(
         ledger,
         ownership,
-        factory=lambda spec: AttemptScript(
-            events=_worker_script(spec).events, event_barrier=True
-        ),
+        factory=lambda spec: AttemptScript(events=_worker_script(spec).events, event_barrier=True),
         auto_release=False,
     )
     coordinator.advance("r1")
@@ -192,7 +201,7 @@ def _control(kind, ledger, run_id, **extra):
     return kind(
         command_id=uuid4(),
         actor="user",
-        target=run_id,
+        target=extra.get("attempt_id", run_id),
         expected_run_revision=ledger.get_run(run_id).state.revision,
         kind=_KINDS[kind],
         run_id=run_id,
@@ -204,6 +213,7 @@ _KINDS = {
     PauseIntervention: InterventionKind.PAUSE,
     ResumeIntervention: InterventionKind.RESUME,
     StopIntervention: InterventionKind.STOP,
+    RetryIntervention: InterventionKind.RETRY,
 }
 
 
@@ -260,3 +270,48 @@ async def test_stop_during_start_survives_the_late_launch_acknowledgement(
 
     # The late acknowledgement must not turn the ambiguous attempt back into a running one.
     assert ledger.get_attempt(attempt_id).state.status is not AttemptStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_retry_on_a_paused_run_does_not_lift_the_pause(app_config, ledger_owner) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "review", "r5")
+    failed_once: list[str] = []
+
+    def factory(spec):
+        if not failed_once:
+            failed_once.append(spec.attempt_id)
+            return AttemptScript(
+                events=(
+                    WorkerFailureEvent(
+                        kind="failed",
+                        attempt_id=spec.attempt_id,
+                        sequence=1,
+                        failure_class=FailureClass.PROVIDER_TRANSIENT,
+                        summary="transient",
+                        safe_to_retry=True,
+                    ),
+                ),
+                event_barrier=True,
+            )
+        return _worker_script(spec)
+
+    coordinator, backend, _clock = _coordinator(
+        ledger, ownership, factory=factory, auto_release=False
+    )
+    coordinator.advance("r5")
+    coordinator.advance("r5")
+    await coordinator.dispatch_pending("r5")
+    attempt_id = ledger.list_attempts("r5")[0].spec.attempt_id
+    await asyncio.wait_for(backend.wait_until_waiting(attempt_id, 0), 5)
+    await coordinator.apply_intervention(_control(PauseIntervention, ledger, "r5"))
+    backend.release_next(attempt_id)
+    await asyncio.wait_for(coordinator.wait_for_workers(), 5)
+    assert ledger.get_run("r5").state.status is RunStatus.PAUSED
+
+    await coordinator.apply_intervention(
+        _control(RetryIntervention, ledger, "r5", attempt_id=attempt_id)
+    )
+
+    assert ledger.get_run("r5").state.status is RunStatus.PAUSED
+    assert len(backend.start_calls) == 1

@@ -347,9 +347,7 @@ def _apply_profile_overlays(
                 )
         # Take typed values from the overlay itself: model_dump would turn nested models
         # into plain dicts that later code cannot treat as PermissionSet or ContextPolicy.
-        changes = {
-            key: getattr(overlay, key) for key, value in fields.items() if value is not None
-        }
+        changes = {key: getattr(overlay, key) for key, value in fields.items() if value is not None}
         if changes:
             current = AgentProfile.model_validate(
                 {**current.model_dump(), **{k: _plain(v) for k, v in changes.items()}}
