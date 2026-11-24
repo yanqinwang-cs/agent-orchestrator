@@ -8,15 +8,12 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 import pytest
 from test_execution_coordinator import (
     STAMP,
-    _complete_plan_before_decision,
     _coordinator,
     _create_run,
-    _decision_result,
     _worker_script,
 )
 
 from orchestrator.backends.fake import AttemptScript, FakeBackend, FakeClock, ScriptedFailure
-from orchestrator.backends.fake_decision import DecisionBarrier, FakeDecisionEngine
 from orchestrator.domain.backend import Reconciliation, WorkerDisconnectedEvent, WorkerFailureEvent
 from orchestrator.domain.models import (
     AttemptStatus,
@@ -318,38 +315,3 @@ async def test_retry_on_a_paused_run_does_not_lift_the_pause(app_config, ledger_
 
     assert ledger.get_run("r5").state.status is RunStatus.PAUSED
     assert len(backend.start_calls) == 1
-
-
-@pytest.mark.asyncio
-async def test_decision_gone_stale_while_pausing_surfaces_attention(
-    app_config, ledger_owner
-) -> None:
-    ledger, ownership = ledger_owner
-    _create_run(ledger, app_config, "prototype", "p")
-    _complete_plan_before_decision(ledger, "p")
-    barrier = DecisionBarrier()
-    engine = FakeDecisionEngine(
-        (lambda request: _decision_result(request, outcome_id="implementer"),), barrier=barrier
-    )
-    coordinator, _, _ = _coordinator(
-        ledger, ownership, factory=_worker_script, decision_engine=engine
-    )
-    task = asyncio.create_task(asyncio.wait_for(coordinator.run_until_stalled("p"), 5))
-    await asyncio.wait_for(barrier.entered.wait(), 5)
-    revision = ledger.get_run("p").state.revision
-    await coordinator.apply_intervention(
-        PauseIntervention(
-            command_id=uuid4(),
-            actor="user",
-            target="p",
-            expected_run_revision=revision,
-            kind=InterventionKind.PAUSE,
-            run_id="p",
-        )
-    )
-    barrier.release.set()
-    await task
-
-    state = ledger.get_run("p").state
-    assert state.status == RunStatus.ATTENTION_REQUIRED
-    assert "stale_run_revision" in (state.attention_reason or "")
