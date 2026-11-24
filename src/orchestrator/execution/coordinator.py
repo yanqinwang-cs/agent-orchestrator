@@ -902,6 +902,9 @@ class ExecutionCoordinator:
                     "error_class": FailureClass.CANCELLED,
                     "error_summary": reason,
                     "safe_to_retry": True,
+                    # The system, not a worker, ended this attempt before launch: its slot
+                    # may be admitted again without a user Retry.
+                    "retry_authorized": True,
                 }
             )
             next_status = self._status_after_settlement(run, attempt.spec.attempt_id)
@@ -3499,16 +3502,30 @@ class ExecutionCoordinator:
     ) -> bool:
         previous = lineage[-1]
         policy = self._profile(run, profile_id).retry_policy
+        # An attempt cancelled before any worker started spends no retry budget.
+        used = sum(1 for item in lineage if not self._never_launched(item))
         return (
             run.spec.workflow.policy.allow_retry
             and previous.state.status
             in {AttemptStatus.FAILED, AttemptStatus.TIMED_OUT, AttemptStatus.CANCELLED}
-            and previous.state.error_class in policy.recoverable_classes
-            and len(lineage) < min(policy.max_attempts, run.spec.workflow.max_attempts_per_slot)
+            and (
+                previous.state.error_class in policy.recoverable_classes
+                or self._never_launched(previous)
+            )
+            and used < min(policy.max_attempts, run.spec.workflow.max_attempts_per_slot)
             and (not policy.require_safe_retry or previous.state.safe_to_retry)
             and (
                 previous.state.status != AttemptStatus.CANCELLED or previous.state.retry_authorized
             )
+        )
+
+    @staticmethod
+    def _never_launched(attempt: PersistedAttempt) -> bool:
+        return (
+            attempt.state.status == AttemptStatus.CANCELLED
+            and attempt.state.started_at is None
+            and attempt.state.worker_handle_id is None
+            and attempt.state.retry_authorized
         )
 
     def _stage_has_only_settled_slots(self, run: PersistedRun, stage: ResolvedStage) -> bool:

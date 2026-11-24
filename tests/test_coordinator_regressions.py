@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
 from test_execution_coordinator import (
@@ -18,7 +18,11 @@ from orchestrator.domain.backend import Reconciliation, WorkerDisconnectedEvent,
 from orchestrator.domain.models import (
     AttemptStatus,
     FailureClass,
+    InterventionKind,
+    PauseIntervention,
+    ResumeIntervention,
     RunStatus,
+    StopIntervention,
 )
 
 
@@ -161,3 +165,41 @@ async def test_failure_settlement_keeps_the_reconciliation_attention_reason(
     status = await asyncio.wait_for(coordinator.run_until_stalled(run_id), 5)
 
     assert status is RunStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_pause_between_admission_and_launch_does_not_spend_the_retry_budget(
+    app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "review", "r3")
+    coordinator, backend, _clock = _coordinator(ledger, ownership, factory=_worker_script)
+    coordinator.advance("r3")
+    coordinator.advance("r3")  # attempt admitted: launching, launch intent still pending
+    assert ledger.list_attempts("r3")[0].state.status is AttemptStatus.LAUNCHING
+
+    await coordinator.apply_intervention(_control(PauseIntervention, ledger, "r3"))
+    await coordinator.apply_intervention(_control(ResumeIntervention, ledger, "r3"))
+    status = await coordinator.run_until_stalled("r3")
+
+    assert status is RunStatus.SUCCEEDED
+    assert len(backend.start_calls) == 1
+
+
+def _control(kind, ledger, run_id, **extra):
+    return kind(
+        command_id=uuid4(),
+        actor="user",
+        target=run_id,
+        expected_run_revision=ledger.get_run(run_id).state.revision,
+        kind=_KINDS[kind],
+        run_id=run_id,
+        **extra,
+    )
+
+
+_KINDS = {
+    PauseIntervention: InterventionKind.PAUSE,
+    ResumeIntervention: InterventionKind.RESUME,
+    StopIntervention: InterventionKind.STOP,
+}
