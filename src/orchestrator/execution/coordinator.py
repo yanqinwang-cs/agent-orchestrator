@@ -2809,11 +2809,15 @@ class ExecutionCoordinator:
         deadline = started_at.timestamp() + profile.timeout_seconds
         stream = self.backend.events(handle)
         sequence = 0
+        # One pending read survives clock ticks: cancelling an async generator's
+        # anext() ends the stream, which would drop every later worker event.
+        event_task: asyncio.Future[WorkerEvent] | None = None
         try:
             while True:
-                event_task: asyncio.Future[WorkerEvent] = asyncio.ensure_future(anext(stream))
+                if event_task is None:
+                    event_task = asyncio.ensure_future(anext(stream))
                 clock_task = asyncio.create_task(self.clock.wait_until_advanced(self.clock.now))
-                done, pending = await asyncio.wait(
+                done, _pending = await asyncio.wait(
                     (event_task, clock_task), return_when=asyncio.FIRST_COMPLETED
                 )
                 if event_task in done:
@@ -2822,8 +2826,9 @@ class ExecutionCoordinator:
                         await clock_task
                     except asyncio.CancelledError:
                         pass
+                    finished, event_task = event_task, None
                     try:
-                        event = event_task.result()
+                        event = finished.result()
                     except StopAsyncIteration:
                         self._mark_unknown_launch(
                             self._action_for_attempt(attempt_id),
@@ -2857,12 +2862,13 @@ class ExecutionCoordinator:
                     )
                     return
 
-                event_task.cancel()
-                try:
-                    await event_task
-                except (asyncio.CancelledError, StopAsyncIteration):
-                    pass
                 if self._now().timestamp() >= deadline:
+                    event_task.cancel()
+                    try:
+                        await event_task
+                    except (asyncio.CancelledError, StopAsyncIteration):
+                        pass
+                    event_task = None
                     current_run = self.ledger.get_run(attempt.spec.run_id)
                     await self.apply_intervention(
                         StopAttemptIntervention(
@@ -2878,9 +2884,6 @@ class ExecutionCoordinator:
                         )
                     )
                     return
-                for task in pending:
-                    if task is not event_task:
-                        task.cancel()
         except asyncio.CancelledError:
             raise
         except BaseException as error:
@@ -2889,6 +2892,9 @@ class ExecutionCoordinator:
                 self.ledger.get_attempt(attempt_id),
                 f"worker stream outcome is unknown: {type(error).__name__}",
             )
+        finally:
+            if event_task is not None and not event_task.done():
+                event_task.cancel()
 
     @staticmethod
     def _validate_event_order(event: WorkerEvent, attempt_id: str, previous: int) -> int:
@@ -3045,20 +3051,7 @@ class ExecutionCoordinator:
                 expected_revision=run.state.revision,
                 actor=self.actor,
                 occurred_at=finished,
-                run_update=RunProjectionUpdate(
-                    status=next_status,
-                    elapsed_seconds=self._elapsed(run),
-                    attention_reason=(
-                        run.state.attention_reason
-                        if next_status == RunStatus.ATTENTION_REQUIRED
-                        else None
-                    ),
-                    resume_status=(
-                        run.state.resume_status
-                        if next_status == RunStatus.ATTENTION_REQUIRED
-                        else None
-                    ),
-                ),
+                run_update=self._settlement_run_update(run, next_status),
                 attempt_updates=(state,),
                 attempt_results=(AttemptResultRegistration(attempt_id=attempt_id, result=result),),
                 reservations=reservations,
@@ -3121,20 +3114,7 @@ class ExecutionCoordinator:
                 expected_revision=run.state.revision,
                 actor=self.actor,
                 occurred_at=self._now(),
-                run_update=RunProjectionUpdate(
-                    status=next_status,
-                    elapsed_seconds=self._elapsed(run),
-                    attention_reason=(
-                        run.state.attention_reason
-                        if next_status == RunStatus.ATTENTION_REQUIRED
-                        else None
-                    ),
-                    resume_status=(
-                        run.state.resume_status
-                        if next_status == RunStatus.ATTENTION_REQUIRED
-                        else None
-                    ),
-                ),
+                run_update=self._settlement_run_update(run, next_status),
                 attempt_updates=(failed,),
                 outbox_outcomes=(
                     OutboxOutcomeChange(
@@ -3195,18 +3175,7 @@ class ExecutionCoordinator:
                 expected_revision=run.state.revision,
                 actor=self.actor,
                 occurred_at=self._now(),
-                run_update=RunProjectionUpdate(
-                    status=next_status,
-                    elapsed_seconds=self._elapsed(run),
-                    attention_reason=(
-                        summary if next_status == RunStatus.ATTENTION_REQUIRED else None
-                    ),
-                    resume_status=(
-                        run.state.resume_status or run.state.status
-                        if next_status == RunStatus.ATTENTION_REQUIRED
-                        else None
-                    ),
-                ),
+                run_update=self._settlement_run_update(run, next_status, summary),
                 attempt_updates=(failed,),
                 attempt_results=(result_registration,) if result_registration else (),
                 reservations=releases,
@@ -3236,13 +3205,10 @@ class ExecutionCoordinator:
                     "safe_to_retry": False,
                 }
             )
-            return LedgerMutation(
-                command_id=uuid4(),
-                run_id=run.run_id,
-                expected_revision=run.state.revision,
-                actor=self.actor,
-                occurred_at=self._now(),
-                run_update=RunProjectionUpdate(
+            run_update = (
+                RunProjectionUpdate(status=run.state.status, elapsed_seconds=self._elapsed(run))
+                if run.state.status in {RunStatus.SUCCEEDED, RunStatus.FAILED}
+                else RunProjectionUpdate(
                     status=RunStatus.ATTENTION_REQUIRED,
                     elapsed_seconds=self._elapsed(run),
                     attention_reason=(
@@ -3251,7 +3217,15 @@ class ExecutionCoordinator:
                         else f"reconciliation pending: {summary}"
                     ),
                     resume_status=run.state.resume_status or run.state.status,
-                ),
+                )
+            )
+            return LedgerMutation(
+                command_id=uuid4(),
+                run_id=run.run_id,
+                expected_revision=run.state.revision,
+                actor=self.actor,
+                occurred_at=self._now(),
+                run_update=run_update,
                 attempt_updates=(uncertain,),
                 outbox_outcomes=(
                     OutboxOutcomeChange(
@@ -3917,7 +3891,27 @@ class ExecutionCoordinator:
             for item in self.ledger.list_attempts(run_id)
         )
 
+    def _settlement_run_update(
+        self, run: PersistedRun, next_status: RunStatus, fallback_reason: str | None = None
+    ) -> RunProjectionUpdate:
+        """Build the run projection for every settlement, keeping an existing attention reason."""
+
+        attention = next_status == RunStatus.ATTENTION_REQUIRED
+        was_attention = run.state.status == RunStatus.ATTENTION_REQUIRED
+        return RunProjectionUpdate(
+            status=next_status,
+            elapsed_seconds=self._elapsed(run),
+            attention_reason=(run.state.attention_reason or fallback_reason) if attention else None,
+            resume_status=(
+                (run.state.resume_status if was_attention else run.state.status)
+                if attention
+                else None
+            ),
+        )
+
     def _status_after_settlement(self, run: PersistedRun, attempt_id: str) -> RunStatus:
+        if run.state.status in {RunStatus.SUCCEEDED, RunStatus.FAILED}:
+            return run.state.status
         remaining = any(
             item.spec.attempt_id != attempt_id and item.state.status in _ACTIVE_ATTEMPT_STATES
             for item in self.ledger.list_attempts(run.run_id)

@@ -1,0 +1,163 @@
+"""Regression tests for reproduced coordinator bugs, run on the fake backend and fake clock."""
+
+from __future__ import annotations
+
+import asyncio
+from uuid import NAMESPACE_URL, uuid5
+
+import pytest
+from test_execution_coordinator import (
+    _coordinator,
+    _create_run,
+    _worker_script,
+    ledger_owner,  # noqa: F401  (fixture)
+)
+
+from orchestrator.backends.fake import AttemptScript, ScriptedFailure
+from orchestrator.domain.backend import Reconciliation, WorkerDisconnectedEvent, WorkerFailureEvent
+from orchestrator.domain.models import (
+    AttemptStatus,
+    FailureClass,
+    RunStatus,
+)
+
+
+async def _settle_loop(turns: int = 20) -> None:
+    for _ in range(turns):
+        await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_clock_tick_before_deadline_keeps_the_worker_event_stream(
+    app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "review", "r1")
+    coordinator, backend, clock = _coordinator(
+        ledger,
+        ownership,
+        factory=lambda spec: AttemptScript(
+            events=_worker_script(spec).events, event_barrier=True
+        ),
+        auto_release=False,
+    )
+    coordinator.advance("r1")
+    coordinator.advance("r1")
+    await coordinator.dispatch_pending("r1")
+    attempt_id = ledger.list_attempts("r1")[0].spec.attempt_id
+    await backend.wait_until_waiting(attempt_id, 0)
+
+    clock.advance(1)  # far below the profile timeout
+    await _settle_loop()
+    backend.release_next(attempt_id)
+    await coordinator.wait_for_workers()
+
+    assert ledger.get_attempt(attempt_id).state.status is AttemptStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_failed_run_stays_failed_when_a_sibling_attempt_settles(
+    app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "research", "r2")
+    first: dict[str, str] = {}
+
+    def factory(spec):
+        if not first:
+            first["id"] = spec.attempt_id
+            return AttemptScript(
+                events=(),
+                start_failure=ScriptedFailure(
+                    FailureClass.CONFIGURATION, "bad config", safe_to_retry=False
+                ),
+            )
+        return AttemptScript(events=_worker_script(spec).events, event_barrier=True)
+
+    coordinator, backend, _clock = _coordinator(
+        ledger, ownership, factory=factory, auto_release=False
+    )
+    coordinator.advance("r2")
+    coordinator.advance("r2")
+    await coordinator.dispatch_pending("r2")
+    coordinator.advance("r2")
+    assert ledger.get_run("r2").state.status is RunStatus.FAILED
+    survivor = next(a for a in ledger.list_attempts("r2") if a.spec.attempt_id != first["id"])
+    await backend.wait_until_waiting(survivor.spec.attempt_id, 0)
+
+    backend.release_next(survivor.spec.attempt_id)
+    await coordinator.wait_for_workers()
+
+    assert ledger.get_run("r2").state.status is RunStatus.FAILED
+    assert ledger.get_attempt(survivor.spec.attempt_id).state.status is AttemptStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_failure_settlement_keeps_the_reconciliation_attention_reason(
+    app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    run_id = "r6"
+    first_attempt = str(uuid5(NAMESPACE_URL, f"{run_id}/research/research/slot-01/1"))
+    _create_run(ledger, app_config, "research", run_id)
+
+    failed_once: list[str] = []
+
+    def factory(spec):
+        if spec.attempt_id == first_attempt:
+            good = _worker_script(spec).events[0]
+            return AttemptScript(
+                events=(
+                    WorkerDisconnectedEvent(
+                        kind="disconnected",
+                        attempt_id=first_attempt,
+                        sequence=1,
+                        reason="socket closed",
+                    ),
+                ),
+                reconciliations=(
+                    Reconciliation(
+                        known=True,
+                        status=AttemptStatus.SUCCEEDED,
+                        terminal_result=good.result,
+                    ),
+                ),
+                event_barrier=False,
+            )
+        if not failed_once:
+            failed_once.append(spec.attempt_id)
+            return AttemptScript(
+                events=(
+                    WorkerFailureEvent(
+                        kind="failed",
+                        attempt_id=spec.attempt_id,
+                        sequence=1,
+                        failure_class=FailureClass.PROVIDER_TRANSIENT,
+                        summary="slot-02 transient failure",
+                        safe_to_retry=True,
+                    ),
+                ),
+                event_barrier=True,
+            )
+        return AttemptScript(events=_worker_script(spec).events, event_barrier=False)
+
+    coordinator, backend, _clock = _coordinator(
+        ledger, ownership, factory=factory, auto_release=False
+    )
+    coordinator.advance(run_id)
+    coordinator.advance(run_id)
+    await asyncio.wait_for(coordinator.dispatch_pending(run_id), 5)
+    other = next(a for a in ledger.list_attempts(run_id) if a.spec.attempt_id != first_attempt)
+    await asyncio.wait_for(backend.wait_until_waiting(other.spec.attempt_id, 0), 5)
+    await _settle_loop()
+    reason_before = ledger.get_run(run_id).state.attention_reason
+    assert reason_before is not None and reason_before.startswith("reconciliation pending")
+
+    backend.release_next(other.spec.attempt_id)
+    await asyncio.wait_for(coordinator.wait_for_workers(), 5)
+    assert ledger.get_run(run_id).state.attention_reason == reason_before
+
+    await asyncio.wait_for(coordinator.recover(run_id), 5)
+    status = await asyncio.wait_for(coordinator.run_until_stalled(run_id), 5)
+
+    assert status is RunStatus.SUCCEEDED
