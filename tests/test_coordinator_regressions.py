@@ -17,7 +17,12 @@ from test_execution_coordinator import (
 
 from orchestrator.backends.fake import AttemptScript, FakeBackend, FakeClock, ScriptedFailure
 from orchestrator.backends.fake_decision import DecisionBarrier, FakeDecisionEngine
-from orchestrator.domain.backend import Reconciliation, WorkerDisconnectedEvent, WorkerFailureEvent
+from orchestrator.domain.backend import (
+    Reconciliation,
+    WorkerDisconnectedEvent,
+    WorkerEventKind,
+    WorkerFailureEvent,
+)
 from orchestrator.domain.models import (
     AttemptStatus,
     FailureClass,
@@ -128,7 +133,7 @@ async def test_failure_settlement_keeps_the_reconciliation_attention_reason(
             return AttemptScript(
                 events=(
                     WorkerDisconnectedEvent(
-                        kind="disconnected",
+                        kind=WorkerEventKind.DISCONNECTED,
                         attempt_id=first_attempt,
                         sequence=1,
                         reason="socket closed",
@@ -148,7 +153,7 @@ async def test_failure_settlement_keeps_the_reconciliation_attention_reason(
             return AttemptScript(
                 events=(
                     WorkerFailureEvent(
-                        kind="failed",
+                        kind=WorkerEventKind.FAILED,
                         attempt_id=spec.attempt_id,
                         sequence=1,
                         failure_class=FailureClass.PROVIDER_TRANSIENT,
@@ -288,7 +293,7 @@ async def test_retry_on_a_paused_run_does_not_lift_the_pause(app_config, ledger_
             return AttemptScript(
                 events=(
                     WorkerFailureEvent(
-                        kind="failed",
+                        kind=WorkerEventKind.FAILED,
                         attempt_id=spec.attempt_id,
                         sequence=1,
                         failure_class=FailureClass.PROVIDER_TRANSIENT,
@@ -456,7 +461,7 @@ async def test_manual_retry_budget_ignores_never_launched_attempts(
             return AttemptScript(
                 events=(
                     WorkerFailureEvent(
-                        kind="failed",
+                        kind=WorkerEventKind.FAILED,
                         attempt_id=spec.attempt_id,
                         sequence=1,
                         failure_class=FailureClass.PROVIDER_TRANSIENT,

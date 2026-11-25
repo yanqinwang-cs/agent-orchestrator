@@ -19,11 +19,11 @@ from orchestrator.domain.models import (
 from orchestrator.resolution import ResolutionError, resolve_run
 
 
-def _project_with_models(app_config, efforts: list[str] | None = None):
+def _project_with_models(app_config, efforts: list[Effort] | None = None):
     binding = ModelBindingSettings(
         backend="codex",
         model_id="offline-test-model",
-        allowed_efforts=efforts or ["high", "medium"],
+        allowed_efforts=efforts or [Effort.HIGH, Effort.MEDIUM],
     )
     return app_config.project.model_copy(update={"models": {"standard": binding}})
 
@@ -127,7 +127,7 @@ def test_missing_project_model_binding_is_rejected(app_config) -> None:
 def test_backend_unsupported_effort_is_rejected(app_config, repo_root: Path) -> None:
     path = repo_root / "tests" / "fixtures" / "invalid" / "unsupported-effort.toml"
     overlays = parse_model(ProfileOverlayFile, path).profiles
-    project = _project_with_models(app_config, ["high", "ultra"])
+    project = _project_with_models(app_config, [Effort.HIGH, Effort.ULTRA])
     with pytest.raises(ResolutionError, match="unsupported effort 'ultra'"):
         resolve_run(
             "Review the current changes",
@@ -226,7 +226,9 @@ def test_pre_m5_resolved_policy_payload_remains_readable(app_config) -> None:
 
 
 def test_narrowing_permission_overlay_resolves_to_typed_profile(app_config) -> None:
-    overlay = ProfileOverlay(profile_id="reviewer", permissions=PermissionSet(sandbox="read-only"))
+    overlay = ProfileOverlay(
+        profile_id="reviewer", permissions=PermissionSet(sandbox=SandboxMode.READ_ONLY)
+    )
 
     spec = _resolve(app_config, profile_overlays=(overlay,))
 

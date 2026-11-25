@@ -813,7 +813,7 @@ class CodexBackend:
 
             # No thread is created until every effective configuration layer is inventoried.
             preparation_stage = "thread/start"
-            from openai_codex.generated.v2_all import (  # type: ignore[import-not-found]
+            from openai_codex.generated.v2_all import (
                 AskForApproval,
                 SandboxMode,
                 ThreadStartParams,
@@ -1296,11 +1296,18 @@ class CodexBackend:
                     f"accepted_authority_projection_sha256={accepted_projection_hash}; "
                     f"observed_authority_projection_sha256={observed_projection_hash}"
                 )
-            params = self._turn_start_params(prepared)
+            thread_id = prepared.prepared_handle.thread_id
+            if thread_id is None:
+                raise KnownPrelaunchFailure(
+                    FailureClass.CONFIGURATION,
+                    "Codex start requires a thread identity before the turn can begin",
+                    safe_to_retry=False,
+                )
+            params = self._turn_start_params(prepared, thread_id)
             assert prepared.client is not None
             prepared.turn_task = asyncio.create_task(
                 prepared.client.turn_start(
-                    prepared.prepared_handle.thread_id,
+                    thread_id,
                     self._prompt(spec),
                     params,
                 )
@@ -1578,7 +1585,7 @@ class CodexBackend:
             )
             raise
         except Exception as error:
-            from openai_codex.errors import (  # type: ignore[import-not-found]
+            from openai_codex.errors import (
                 InvalidRequestError,
             )
 
@@ -2200,8 +2207,8 @@ class CodexBackend:
     def _new_client(self, owner: Any, *, project: Path, home: Path, cli_path: Path) -> Any:
         if self._client_factory is not None:
             return self._client_factory()
-        from openai_codex.async_client import AsyncCodexClient  # type: ignore[import-not-found]
-        from openai_codex.client import CodexConfig  # type: ignore[import-not-found]
+        from openai_codex.async_client import AsyncCodexClient
+        from openai_codex.client import CodexConfig
 
         environment = self._sanitized_environment(home, cli_path)
         return AsyncCodexClient(
@@ -2217,7 +2224,7 @@ class CodexBackend:
         )
 
     async def _read_effective_config(self, client: Any, cwd: Path, prepared: _PreparedCodex) -> Any:
-        from openai_codex.generated.v2_all import (  # type: ignore[import-not-found]
+        from openai_codex.generated.v2_all import (
             ConfigReadParams,
             ConfigReadResponse,
         )
@@ -2233,7 +2240,7 @@ class CodexBackend:
         )
 
     async def _read_config_requirements(self, client: Any, prepared: _PreparedCodex) -> Any:
-        from openai_codex.generated.v2_all import (  # type: ignore[import-not-found]
+        from openai_codex.generated.v2_all import (
             ConfigRequirementsReadResponse,
         )
 
@@ -2247,8 +2254,8 @@ class CodexBackend:
         )
 
     @staticmethod
-    def _turn_start_params(prepared: _PreparedCodex) -> Any:
-        from openai_codex.generated.v2_all import (  # type: ignore[import-not-found]
+    def _turn_start_params(prepared: _PreparedCodex, thread_id: str) -> Any:
+        from openai_codex.generated.v2_all import (
             AskForApproval,
             ReasoningEffort,
             SandboxPolicy,
@@ -2256,7 +2263,7 @@ class CodexBackend:
         )
 
         return TurnStartParams(
-            thread_id=prepared.prepared_handle.thread_id,
+            thread_id=thread_id,
             input=[],
             effort=ReasoningEffort(prepared.spec.effort.value),
             model=prepared.spec.model_id,
@@ -2658,7 +2665,7 @@ class CodexBackend:
                     same_typed_value(left, right)
                     for left, right in zip(actual, expected, strict=True)
                 )
-            return actual == expected
+            return bool(actual == expected)
 
         def valid_value(rule: _ReviewedRuntimeSetting, candidate: Any) -> bool:
             if rule.expected is not _UNSET:
@@ -2935,14 +2942,14 @@ class CodexBackend:
     @staticmethod
     def _system_config_path() -> Path:
         if os.name == "nt":
-            program_data = Path(os.environ.get("ProgramData", r"C:\ProgramData"))
+            program_data = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData"))
             return program_data / "OpenAI" / "Codex" / "config.toml"
         return Path("/etc/codex/config.toml")
 
     @staticmethod
     def _managed_policy_paths(home: Path) -> tuple[Path, ...]:
         if os.name == "nt":
-            program_data = Path(os.environ.get("ProgramData", r"C:\ProgramData"))
+            program_data = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData"))
             return (
                 program_data / "OpenAI" / "Codex" / "requirements.toml",
                 home / "managed_config.toml",

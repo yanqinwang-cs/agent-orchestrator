@@ -247,7 +247,7 @@ def _spec(run_id: str, attempt_id: str, run_snapshot_hash: str) -> AgentRunSpec:
         input_manifest=(),
         backend="codex",
         model_id="gpt-5.6-sol",
-        effort="high",
+        effort=Effort.HIGH,
         permissions=PermissionSet(
             sandbox=SandboxMode.READ_ONLY,
             shell_network=False,

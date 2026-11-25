@@ -31,9 +31,11 @@ from orchestrator.domain.decisions import (
     DecisionEvidence,
     DecisionInferenceBinding,
     DecisionOption,
+    DecisionQuestionConfig,
     DecisionRequest,
     DecisionResult,
     DecisionScoreVector,
+    ResolvedDecisionQuestion,
 )
 from orchestrator.domain.models import (
     AgentCatalog,
@@ -41,7 +43,6 @@ from orchestrator.domain.models import (
     Artifact,
     AttemptState,
     BackendSettings,
-    DecisionQuestionConfig,
     DevelopmentConfig,
     Event,
     Handoff,
@@ -49,7 +50,6 @@ from orchestrator.domain.models import (
     OrchestratorPolicy,
     ProfileOverlayFile,
     ProjectConfig,
-    ResolvedDecisionQuestion,
     ResolvedOrchestratorPolicy,
     RunSpec,
     RunState,
