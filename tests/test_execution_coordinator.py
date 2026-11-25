@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import NAMESPACE_URL, uuid4, uuid5
@@ -21,6 +22,8 @@ from orchestrator.domain.backend import (
     OutputStatus,
     Reconciliation,
     ShutdownReceipt,
+    WorkerEventKind,
+    WorkerHandle,
     WorkerResult,
     WorkerTerminalEvent,
     derive_lifecycle_owner_id,
@@ -29,10 +32,12 @@ from orchestrator.domain.decisions import (
     DecisionDispositionReason,
     DecisionDispositionStatus,
     DecisionEngineFailure,
+    DecisionFailureClass,
     DecisionResult,
     DecisionResultClass,
 )
 from orchestrator.domain.models import (
+    AgentRunSpec,
     AttemptStatus,
     BackendPreparationIntentRecordedEvent,
     Effort,
@@ -170,7 +175,7 @@ def _worker_script(spec, *, statuses=None):
         ),
     )
     event = WorkerTerminalEvent(
-        kind="terminal",
+        kind=WorkerEventKind.TERMINAL,
         attempt_id=spec.attempt_id,
         sequence=1,
         result=result,
@@ -487,7 +492,7 @@ async def test_abstention_and_engine_failure_follow_declared_attention_policy(
         (
             lambda request: DecisionEngineFailure(
                 decision_id=request.decision_id,
-                classification="engine_error",
+                classification=DecisionFailureClass.ENGINE_ERROR,
                 detail="scripted failure",
             ),
         )
@@ -579,7 +584,7 @@ async def test_wrong_decision_identity_is_durably_rejected(app_config, ledger_ow
             return _decision_result(request).model_copy(update={"decision_id": uuid4()})
         return DecisionEngineFailure(
             decision_id=uuid4(),
-            classification="engine_error",
+            classification=DecisionFailureClass.ENGINE_ERROR,
             detail="Wrong request.",
         )
 
@@ -631,7 +636,7 @@ async def test_malformed_engine_reply_never_dispatches_failure_fallback(
             return _decision_result(request).model_copy(update={"outcome_id": None})
         return DecisionEngineFailure(
             decision_id=request.decision_id,
-            classification="incompatible_result",
+            classification=DecisionFailureClass.INCOMPATIBLE_RESULT,
             detail="Bad schema.",
         )
 
@@ -731,6 +736,7 @@ async def test_decision_crash_boundaries_reopen_without_reinference(app_config, 
             if outcome != "pending":
                 assert record == saved
             else:
+                assert record.failure is not None
                 assert record.failure.classification.value == "engine_unavailable"
             assert engine.requests == []
             launches = list(backend.start_calls)
@@ -1078,7 +1084,7 @@ async def test_invalid_output_fails_stage_and_persists_invalid_result(
         return AttemptScript(
             events=(
                 WorkerTerminalEvent(
-                    kind="terminal",
+                    kind=WorkerEventKind.TERMINAL,
                     attempt_id=event.attempt_id,
                     sequence=event.sequence,
                     result=bad_result,
@@ -1113,17 +1119,18 @@ async def test_late_start_ack_after_timeout_never_replays_or_releases_reservatio
                 ),
                 auto_release=False,
             )
-            self.late_ack = None
+            self.late_ack: asyncio.Task | None = None
 
         async def start(self, spec, *, preflight_record_id=None, preflight_record_hash=None):
-            self.late_ack = asyncio.create_task(
+            late_ack = asyncio.create_task(
                 super().start(
                     spec,
                     preflight_record_id=preflight_record_id,
                     preflight_record_hash=preflight_record_hash,
                 )
             )
-            return await asyncio.shield(self.late_ack)
+            self.late_ack = late_ack
+            return await asyncio.shield(late_ack)
 
     backend = LateStartBackend()
     coordinator = ExecutionCoordinator(
@@ -1315,7 +1322,13 @@ async def test_unknown_start_outcome_is_not_retried_and_keeps_reservations(
     _create_run(ledger, app_config, "review", "unknown-run")
 
     class UnknownLaunchBackend(FakeBackend):
-        async def start(self, spec):
+        async def start(
+            self,
+            spec: AgentRunSpec,
+            *,
+            preflight_record_id: str | None = None,
+            preflight_record_hash: str | None = None,
+        ) -> WorkerHandle:
             raise RuntimeError("connection dropped after launch request")
 
     clock = FakeClock(origin=STAMP)
@@ -1434,7 +1447,7 @@ def test_required_upstream_input_blocks_until_its_stage_has_persisted_output(
         run = ledger.get_run("input-gate")
         stage = next(item for item in run.spec.workflow.stages if item.id == "implement")
 
-        with pytest.raises(InputResolutionError, match="plan.plan is unavailable"):
+        with pytest.raises(InputResolutionError, match=re.escape("plan.plan is unavailable")):
             resolve_stage_inputs(run, stage)
     finally:
         ledger.close()

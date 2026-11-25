@@ -32,6 +32,7 @@ from orchestrator.domain.models import (
     Effort,
     EventKind,
     Handoff,
+    InterventionKind,
     InterventionRequestedEvent,
     ModelBindingSettings,
     PauseIntervention,
@@ -39,6 +40,7 @@ from orchestrator.domain.models import (
     RunStatus,
     RunStatusChangedEvent,
     SandboxMode,
+    StageStatus,
 )
 from orchestrator.persistence import SQLiteLedger, UnsupportedSchemaVersion
 from orchestrator.persistence.ledger import (
@@ -75,7 +77,7 @@ def _run_inputs(app_config):
         update={
             "models": {
                 "standard": ModelBindingSettings(
-                    backend="codex", model_id="offline-model", allowed_efforts=["high"]
+                    backend="codex", model_id="offline-model", allowed_efforts=[Effort.HIGH]
                 )
             }
         }
@@ -107,7 +109,7 @@ def _attempt_spec(run_id, run_snapshot_hash, attempt_id="attempt-1"):
         input_manifest=(),
         backend="fake",
         model_id="fake-model",
-        effort="high",
+        effort=Effort.HIGH,
         permissions=PermissionSet(sandbox=SandboxMode.READ_ONLY),
         skills=(),
         tools=("read_files",),
@@ -272,7 +274,7 @@ def test_backend_preflight_record_and_event_are_immutable_and_survive_reopen(
             "occurred_at": STAMP,
             "snapshot": snapshot,
         }
-        record = BackendPreflightRecord(**record_data, record_hash="0" * 64)
+        record = BackendPreflightRecord.model_validate({**record_data, "record_hash": "0" * 64})
         record_hash = content_hash(
             canonical_json(record.model_dump(mode="json", exclude={"record_hash"}))
         )
@@ -339,12 +341,14 @@ def test_backend_preflight_record_and_event_are_immutable_and_survive_reopen(
                     ),
                 )
             )
-        with sqlite3.connect(path) as connection:
-            with pytest.raises(sqlite3.IntegrityError, match="immutable"):
-                connection.execute(
-                    "DELETE FROM backend_preflight_records WHERE record_id = ?",
-                    (record.record_id,),
-                )
+        with (
+            sqlite3.connect(path) as connection,
+            pytest.raises(sqlite3.IntegrityError, match="immutable"),
+        ):
+            connection.execute(
+                "DELETE FROM backend_preflight_records WHERE record_id = ?",
+                (record.record_id,),
+            )
 
 
 def test_codex_read_only_report_is_bounded_and_retained_from_exact_bytes(
@@ -567,7 +571,7 @@ def test_normalized_attempt_results_and_stage_outputs_survive_reopen_immutably(
                 stage_updates=(
                     StageUpdate(
                         stage_id="review",
-                        status="succeeded",
+                        status=StageStatus.SUCCEEDED,
                         result=stage_result,
                     ),
                 ),
@@ -580,7 +584,9 @@ def test_normalized_attempt_results_and_stage_outputs_survive_reopen_immutably(
         assert any(event.kind == "attempt_result_recorded" for event in ledger.list_events("run-1"))
 
     with SQLiteLedger(path) as reopened:
-        assert reopened.get_attempt("attempt-1").result.result == worker_result
+        attempt_result = reopened.get_attempt("attempt-1").result
+        assert attempt_result is not None
+        assert attempt_result.result == worker_result
         assert reopened.get_run("run-1").stages[0].result == stage_result
         altered = worker_result.model_copy(update={"summary": "changed immutable evidence"})
         with pytest.raises(ImmutableSpecificationConflict, match="another terminal result"):
@@ -677,18 +683,17 @@ def test_revision_command_is_applied_once_and_stale_receipt_survives_reopen(
         run = reopened.get_run("run-1")
         assert (run.state.status, run.state.revision) == (RunStatus.RUNNING, 1)
 
-    with SQLiteLedger(path) as ledger:
-        with pytest.raises(CommandIdConflict):
-            ledger.apply(
-                LedgerMutation(
-                    command_id=command_id,
-                    run_id="run-1",
-                    expected_revision=0,
-                    actor="test",
-                    occurred_at=STAMP,
-                    run_update=RunProjectionUpdate(status=RunStatus.FAILED),
-                )
+    with SQLiteLedger(path) as ledger, pytest.raises(CommandIdConflict):
+        ledger.apply(
+            LedgerMutation(
+                command_id=command_id,
+                run_id="run-1",
+                expected_revision=0,
+                actor="test",
+                occurred_at=STAMP,
+                run_update=RunProjectionUpdate(status=RunStatus.FAILED),
             )
+        )
 
 
 def test_failed_mutation_rolls_back_projection_event_outbox_and_reservation(
@@ -701,7 +706,7 @@ def test_failed_mutation_rolls_back_projection_event_outbox_and_reservation(
         run_id="run-1",
         occurred_at=STAMP,
         actor="test",
-        kind="run_status_changed",
+        kind=EventKind.RUN_STATUS_CHANGED,
         previous=RunStatus.READY,
         current=RunStatus.RUNNING,
     )
@@ -714,7 +719,7 @@ def test_failed_mutation_rolls_back_projection_event_outbox_and_reservation(
             actor="test",
             occurred_at=STAMP,
             run_update=RunProjectionUpdate(status=RunStatus.RUNNING),
-            stage_updates=(StageUpdate(stage_id="missing-stage", status="running"),),
+            stage_updates=(StageUpdate(stage_id="missing-stage", status=StageStatus.RUNNING),),
             events=(event,),
             outbox_actions=(
                 OutboxIntent(
@@ -917,18 +922,18 @@ def test_artifact_publication_is_content_addressed_and_survives_reopen(
         assert ledger.get_run("run-1").state.revision == 2
 
     with SQLiteLedger(database) as reopened:
-        manifest = reopened.get_artifact_manifest("artifact-1")
-        assert manifest is not None
+        reopened_manifest = reopened.get_artifact_manifest("artifact-1")
+        assert reopened_manifest is not None
         assert ArtifactStore(data_dir, reopened).read("artifact-1") == content
 
 
 def test_failed_artifact_write_leaves_no_file_or_manifest_and_rejects_traversal(
     tmp_path, app_config
 ) -> None:
-    class InterruptedStream:
+    class InterruptedStream(BytesIO):
         reads = 0
 
-        def read(self, size):
+        def read(self, size=-1):
             self.reads += 1
             if self.reads == 1:
                 return b"partial artifact"
@@ -1110,7 +1115,7 @@ def test_interventions_and_handoffs_are_retrievable_after_reopen(tmp_path, app_c
             actor="operator",
             target="run-1",
             expected_run_revision=2,
-            kind="pause",
+            kind=InterventionKind.PAUSE,
         )
         handoff = Handoff(
             source_attempt_id="attempt-1",
@@ -1135,7 +1140,7 @@ def test_interventions_and_handoffs_are_retrievable_after_reopen(tmp_path, app_c
                         run_id="run-1",
                         occurred_at=STAMP,
                         actor="operator",
-                        kind="intervention_requested",
+                        kind=EventKind.INTERVENTION_REQUESTED,
                         intervention=intervention,
                     ),
                 ),

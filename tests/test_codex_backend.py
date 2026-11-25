@@ -15,6 +15,7 @@ from orchestrator.domain.backend import (
     PreflightContext,
     PreflightResult,
     SteerCommand,
+    WorkerEventKind,
     WorkerFailureEvent,
     WorkerHandle,
 )
@@ -44,7 +45,7 @@ def _spec() -> AgentRunSpec:
         input_manifest=(),
         backend="codex",
         model_id="gpt-5.6-sol",
-        effort="high",
+        effort=Effort.HIGH,
         permissions=PermissionSet(
             sandbox=SandboxMode.READ_ONLY,
             shell_network=False,
@@ -68,7 +69,7 @@ def _settings() -> CodexBackendSettings:
         client_per_attempt=True,
         auth_owner="codex",
         codex_home_env="ORCHESTRATOR_CODEX_HOME",
-        approval_mode="deny_all",
+        approval_mode=ApprovalMode.DENY_ALL,
         experimental_api=False,
         interrupt_grace_seconds=10,
         shutdown_grace_seconds=5,
@@ -295,7 +296,7 @@ async def test_coordinator_persists_accepted_snapshot_before_start_and_rejects_m
                 script_factory=lambda attempt: AttemptScript(
                     events=(
                         WorkerFailureEvent(
-                            kind="failed",
+                            kind=WorkerEventKind.FAILED,
                             attempt_id=attempt.attempt_id,
                             sequence=1,
                             failure_class=FailureClass.WORKER_FAILURE,

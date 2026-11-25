@@ -38,6 +38,10 @@ class QuietHandler(SimpleHTTPRequestHandler):
 
 
 class FrozenWebsiteTests(unittest.TestCase):
+    server: ThreadingHTTPServer
+    thread: threading.Thread
+    base: str
+
     @classmethod
     def setUpClass(cls):
         handler = functools.partial(QuietHandler, directory=str(WEBSITE))

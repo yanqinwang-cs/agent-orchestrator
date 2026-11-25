@@ -7,12 +7,13 @@ from orchestrator.backends.fake import AttemptScript, FakeBackend, FakeClock, Sc
 from orchestrator.domain.backend import (
     OutputStatus,
     SteerCommand,
+    WorkerEventKind,
     WorkerProgressEvent,
     WorkerResult,
     WorkerStartedEvent,
     WorkerTerminalEvent,
 )
-from orchestrator.domain.models import AgentRunSpec, PermissionSet, SandboxMode
+from orchestrator.domain.models import AgentRunSpec, Effort, PermissionSet, SandboxMode
 
 
 def _spec(attempt_id: str = "attempt-1") -> AgentRunSpec:
@@ -25,7 +26,7 @@ def _spec(attempt_id: str = "attempt-1") -> AgentRunSpec:
         input_manifest=(),
         backend="fake",
         model_id="fake-model",
-        effort="high",
+        effort=Effort.HIGH,
         permissions=PermissionSet(sandbox=SandboxMode.READ_ONLY),
         skills=(),
         tools=("read_files",),
@@ -36,12 +37,14 @@ def _spec(attempt_id: str = "attempt-1") -> AgentRunSpec:
 @pytest.mark.asyncio
 async def test_fake_backend_releases_scripted_events_in_order() -> None:
     events = (
-        WorkerStartedEvent(kind="started", attempt_id="attempt-1", sequence=1, handle_id="h1"),
+        WorkerStartedEvent(
+            kind=WorkerEventKind.STARTED, attempt_id="attempt-1", sequence=1, handle_id="h1"
+        ),
         WorkerProgressEvent(
-            kind="progress", attempt_id="attempt-1", sequence=2, message="reviewing"
+            kind=WorkerEventKind.PROGRESS, attempt_id="attempt-1", sequence=2, message="reviewing"
         ),
         WorkerTerminalEvent(
-            kind="terminal",
+            kind=WorkerEventKind.TERMINAL,
             attempt_id="attempt-1",
             sequence=3,
             result=WorkerResult(
@@ -65,7 +68,7 @@ async def test_fake_backend_releases_scripted_events_in_order() -> None:
     stream = backend.events(handle)
     received = []
     for index in range(len(events)):
-        next_event = asyncio.create_task(anext(stream))
+        next_event = asyncio.ensure_future(anext(stream))
         await backend.wait_until_waiting("attempt-1", index)
         backend.release_next("attempt-1")
         received.append(await next_event)

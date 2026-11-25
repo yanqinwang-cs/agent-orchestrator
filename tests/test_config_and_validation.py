@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -107,7 +108,7 @@ def test_missing_input_output_binding_is_rejected(app_config) -> None:
     bad_stage = review.stages[0].model_copy(update={"inputs": ["task", "missing.report"]})
     bad_workflow = review.model_copy(update={"stages": [bad_stage]})
 
-    with pytest.raises(ConfigValidationError, match="missing output 'missing.report'"):
+    with pytest.raises(ConfigValidationError, match=re.escape("missing output 'missing.report'")):
         validate_application(
             app_config.agents,
             [bad_workflow],
@@ -299,11 +300,11 @@ def test_duplicate_profile_in_a_redirect_is_rejected(app_config) -> None:
 
 def test_overlay_path_settings_are_rejected_until_loading_exists(app_config) -> None:
     project = app_config.project.model_copy(update={"agent_overlay_paths": ["overlays/a.toml"]})
-    with pytest.raises(ConfigValidationError, match="project.agent_overlay_paths"):
+    with pytest.raises(ConfigValidationError, match=re.escape("project.agent_overlay_paths")):
         validate_application(app_config.agents, app_config.workflows, app_config.backends, project)
 
     project = app_config.project.model_copy(update={"workflow_overlay_paths": ["w.toml"]})
-    with pytest.raises(ConfigValidationError, match="project.workflow_overlay_paths"):
+    with pytest.raises(ConfigValidationError, match=re.escape("project.workflow_overlay_paths")):
         validate_application(app_config.agents, app_config.workflows, app_config.backends, project)
 
     profile = app_config.agents.agents[0].model_copy(update={"overlay_paths": ["x.toml"]})

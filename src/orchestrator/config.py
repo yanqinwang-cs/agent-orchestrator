@@ -96,7 +96,8 @@ def validate_config_file(path: Path, root: Path | None = None) -> str:
         return f"agent catalog {len(candidate_agents.agents)} profiles"
     if "stages" in raw:
         candidate_workflow = parse_model(WorkflowPreset, source)
-        workflows = tuple(item for item in app.workflows if item.id != candidate_workflow.id) + (
+        workflows = (
+            *(item for item in app.workflows if item.id != candidate_workflow.id),
             candidate_workflow,
         )
         validate_application(app.agents, workflows, app.backends, app.project)

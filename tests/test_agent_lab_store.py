@@ -207,7 +207,9 @@ def test_stale_revision_cannot_overwrite_newer_save(tmp_path) -> None:
             instructions="",
             bindings=(binding("prompt/clarify-task", "1.0.0"),),
         )
-    assert store.get_composition(first.id).current_revision == second.current_revision
+    composition = store.get_composition(first.id)
+    assert composition is not None
+    assert composition.current_revision == second.current_revision
 
 
 def test_model_settings_reject_credential_names_and_preserve_scalar_values(tmp_path) -> None:
@@ -314,9 +316,12 @@ def test_saved_binding_keeps_its_display_snapshot_when_definition_changes(tmp_pa
         )
 
     loaded = store.get_composition(saved.id)
+    assert loaded is not None
     assert loaded.revision.bindings[0].name == "Clarify a task"
     assert loaded.revision.bindings[0].kind == ResourceKind.PROMPT
-    assert store.get_resource("prompt/clarify-task").definition.name == "Renamed later"
+    resource = store.get_resource("prompt/clarify-task")
+    assert resource is not None
+    assert resource.definition.name == "Renamed later"
 
     duplicate = store.duplicate_composition(saved.id, name=saved.revision.name)
     assert duplicate.revision.bindings == saved.revision.bindings

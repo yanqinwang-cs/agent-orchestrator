@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import platform
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -41,6 +43,14 @@ from orchestrator.persistence.models import (
 from orchestrator.resolution import resolve_run
 
 pytestmark = pytest.mark.live
+
+
+def test_bundled_codex_binary_matches_pinned_version(repo_root: Path) -> None:
+    fixture = json.loads((repo_root / "tests/fixtures/backends/codex-sdk-0.159.2.json").read_text())
+    _, cli_version, cli_hash = CodexBackend._inspect_cli()
+    assert cli_version == fixture["cli"]["version"]
+    if platform.system() == "Darwin" and platform.machine() == "arm64":
+        assert cli_hash == fixture["cli"]["sha256"]
 
 
 def _settings() -> CodexBackendSettings:

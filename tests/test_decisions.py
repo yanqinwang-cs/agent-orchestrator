@@ -25,6 +25,7 @@ from orchestrator.domain.decisions import (
     DecisionResultClass,
     DecisionScoreEntry,
     DecisionScoreVector,
+    InferenceStateIdentity,
     evaluate_decision,
 )
 
@@ -270,14 +271,18 @@ def test_calibration_and_inference_state_mismatches_are_rejected() -> None:
         mechanism=DecisionMechanism.NATIVE_DECISION_MODEL,
         decision_model_id="local-router",
         decision_model_revision="1",
-        inference_state={"state_id": "router", "revision": "1", "content_hash": "c" * 64},
+        inference_state=InferenceStateIdentity(
+            state_id="router", revision="1", content_hash="c" * 64
+        ),
     )
     native_request = _request(inference_binding=native_binding)
     mismatched_state = DecisionInferenceBinding(
         mechanism=DecisionMechanism.NATIVE_DECISION_MODEL,
         decision_model_id="local-router",
         decision_model_revision="1",
-        inference_state={"state_id": "router", "revision": "2", "content_hash": "d" * 64},
+        inference_state=InferenceStateIdentity(
+            state_id="router", revision="2", content_hash="d" * 64
+        ),
     )
     native_result = DecisionResult(
         decision_id=native_request.decision_id,
@@ -520,7 +525,9 @@ def test_malformed_and_disallowed_results_never_become_accepted() -> None:
 
 
 def test_four_inference_shapes_have_distinct_effective_identity() -> None:
-    calibration = {"artifact_id": "reviewer-calibration", "revision": "3", "content_hash": "a" * 64}
+    calibration = CalibrationIdentity(
+        artifact_id="reviewer-calibration", revision="3", content_hash="a" * 64
+    )
     shapes = (
         DecisionInferenceBinding(
             mechanism=DecisionMechanism.DETERMINISTIC_POLICY,
@@ -532,11 +539,11 @@ def test_four_inference_shapes_have_distinct_effective_identity() -> None:
             mechanism=DecisionMechanism.NATIVE_DECISION_MODEL,
             decision_model_id="local-specialist-router",
             decision_model_revision="2",
-            inference_state={
-                "state_id": "router-weights",
-                "revision": "4",
-                "content_hash": "b" * 64,
-            },
+            inference_state=InferenceStateIdentity(
+                state_id="router-weights",
+                revision="4",
+                content_hash="b" * 64,
+            ),
         ),
         DecisionInferenceBinding(
             mechanism=DecisionMechanism.GENERAL_LLM_READOUT,

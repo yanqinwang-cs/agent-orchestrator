@@ -25,7 +25,8 @@ uv sync --locked --group dev
 uv run pytest -m 'not live'
 uv run ruff check .
 uv run ruff format --check .
-uv run mypy src
+uv run mypy --strict
+uv run mypy tests scripts
 uv lock --check
 uv run agent-orchestrator --help
 uv run agent-orchestrator --version

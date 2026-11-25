@@ -36,14 +36,21 @@ markers = ["live: tests that make explicitly authorized live provider calls"]
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-extend-exclude = ["scripts/codex_task.py"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+select = ["E", "W", "F", "I", "N", "UP", "B", "SIM", "C4", "PIE", "RUF", "PERF", "ASYNC"]
+# Exception names are public error contracts; renaming them is a separate migration.
+# Nested ifs, try/except-pass cleanup and explicit loop building in the engine read as written;
+# rewriting them would churn run logic without changing behavior.
+ignore = ["N818", "SIM102", "SIM105", "PERF401", "ASYNC109"]
 
 [tool.ruff.lint.per-file-ignores]
 # Regression files import fixtures from the suites that own them; pytest injects them by name.
 "tests/test_*_regressions.py" = ["F811", "F401"]
+# The start path reads small local config files synchronously before any turn exists.
+"src/orchestrator/backends/codex_backend.py" = ["ASYNC240"]
+# The study's inspector makes short calls to a local browser debug port; blocking there is harmless.
+"studies/ceramic-campaign/verify.py" = ["ASYNC210"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -51,3 +58,7 @@ mypy_path = "src"
 packages = ["orchestrator", "agent_lab"]
 show_error_codes = true
 warn_unused_configs = true
+# Checks type errors inside untyped test bodies too. The packages are checked with `mypy --strict`
+# (see .github/workflows/checks.yml); strict is not set here because a per-module strict override
+# also leaks into the tests.
+check_untyped_defs = true

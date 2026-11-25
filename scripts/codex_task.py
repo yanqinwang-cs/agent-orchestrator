@@ -5,10 +5,10 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import shutil
 import subprocess
 import tomllib
+from pathlib import Path
 
 
 def main() -> int:
@@ -51,12 +51,18 @@ def main() -> int:
         parser.error("Codex CLI was not found on PATH. Install it before launching.")
     command = [
         binary or "codex",
-        "-C", str(root),
-        "-s", preset["sandbox"],
-        "-a", "on-request",
-        "-c", 'approvals_reviewer="user"',
-        "-c", "model_reasoning_effort=" + json.dumps(preset["effort"]),
-        "-c", "web_search=" + json.dumps(preset["web_search"]),
+        "-C",
+        str(root),
+        "-s",
+        preset["sandbox"],
+        "-a",
+        "on-request",
+        "-c",
+        'approvals_reviewer="user"',
+        "-c",
+        "model_reasoning_effort=" + json.dumps(preset["effort"]),
+        "-c",
+        "web_search=" + json.dumps(preset["web_search"]),
     ]
     if args.model:
         command.extend(["--model", args.model])

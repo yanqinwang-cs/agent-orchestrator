@@ -1,0 +1,48 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.26"
+
+      - name: Install locked dependencies
+        run: uv sync --locked --group dev
+
+      - name: Verify dependency lock
+        run: uv lock --check
+
+      - name: Test without live provider calls
+        run: uv run pytest -m 'not live'
+
+      - name: Lint
+        run: uv run ruff check
+
+      - name: Check formatting
+        run: uv run ruff format --check
+
+      - name: Type-check packages in strict mode
+        run: uv run mypy --strict
+
+      - name: Type-check tests and scripts
+        run: uv run mypy tests scripts

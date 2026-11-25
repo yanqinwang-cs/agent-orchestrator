@@ -63,7 +63,9 @@ def test_owner_settlement_includes_same_group_child_after_app_server_exit(tmp_pa
 
     owner_id = str(uuid4())
     owner, home, child_pid_path = _launch_owner(tmp_path, owner_id)
-    assert query_owner_status(owner_id, owner_id)["generation"] == owner_id
+    status = query_owner_status(owner_id, owner_id)
+    assert status is not None
+    assert status["generation"] == owner_id
     assert query_owner_status(owner_id, "wrong-generation") is None
     bridge = subprocess.Popen(
         owner.bridge_command(),
