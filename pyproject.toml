@@ -1,17 +1,30 @@
 [build-system]
-requires = ["hatchling>=1.26,<2"]
+requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
 
 [project]
 name = "agent-orchestrator"
 version = "0.1.0"
-description = "A deterministic local orchestration foundation for specialist workers"
+description = "Agent Lab: a deterministic local orchestration foundation and a local discovery and composition API for intelligent-system experiments"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
+keywords = ["agents", "orchestration", "benchmarking", "experiments"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "openai-codex==0.159.2",
     "pydantic>=2.10,<3",
 ]
+
+[project.urls]
+Repository = "https://github.com/yanqinwang-cs/agent-orchestrator"
 
 [project.scripts]
 agent-orchestrator = "orchestrator.cli:main"

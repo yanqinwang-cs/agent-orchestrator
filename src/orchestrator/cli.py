@@ -33,7 +33,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     if args.command is None:
-        print("The run CLI and UI are not implemented yet (Milestone 3).")
+        print("The run CLI and UI are not implemented yet.")
         print("Use --help or validate-config PATH to inspect configuration.")
         return 0
     if args.command == "validate-config":
