@@ -502,3 +502,32 @@ def test_database_and_rollback_journal_are_owner_only(tmp_path) -> None:
         assert journal.exists()
         assert S_IMODE(journal.stat().st_mode) == 0o600
         connection.rollback()
+
+
+def test_composition_cannot_pin_a_catalog_version_whose_body_fails_its_digest(tmp_path) -> None:
+    database = tmp_path / "agent-lab.sqlite3"
+    store = SQLiteStore(database)
+    saved = store.save_composition(
+        name="Review setup",
+        description="",
+        instructions="",
+        bindings=(binding("skill/review-checklist", "1.0.0"),),
+        model_settings=(),
+    )
+    with sqlite3.connect(database) as connection:
+        connection.execute("DROP TRIGGER catalog_versions_no_update")
+        connection.execute(
+            "UPDATE catalog_versions SET body = 'tampered' WHERE resource_id = ? AND version = ?",
+            ("skill/review-checklist", "1.0.0"),
+        )
+
+    with pytest.raises(PersistenceIntegrityError, match="digest verification"):
+        store.save_composition(
+            name="Another setup",
+            description="",
+            instructions="",
+            bindings=(binding("skill/review-checklist", "1.0.0"),),
+            model_settings=(),
+        )
+    with pytest.raises(PersistenceIntegrityError, match="digest verification"):
+        store.get_composition(saved.id)

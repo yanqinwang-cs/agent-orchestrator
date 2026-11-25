@@ -41,6 +41,10 @@ extend-exclude = ["scripts/codex_task.py"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
+[tool.ruff.lint.per-file-ignores]
+# Regression files import fixtures from the suites that own them; pytest injects them by name.
+"tests/test_*_regressions.py" = ["F811", "F401"]
+
 [tool.mypy]
 python_version = "3.12"
 mypy_path = "src"

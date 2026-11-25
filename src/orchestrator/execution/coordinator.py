@@ -489,10 +489,23 @@ class ExecutionCoordinator:
             if self._requires_backend_preflight_record():
                 attempt = self._ensure_backend_preparation_intent(action, attempt)
             context = self._preflight_context(action, attempt)
-            preflight = await asyncio.wait_for(
-                self.backend.preflight(attempt.spec, context),
-                timeout=self.preflight_timeout_seconds,
-            )
+            try:
+                preflight = await asyncio.wait_for(
+                    self.backend.preflight(attempt.spec, context),
+                    timeout=self.preflight_timeout_seconds,
+                )
+            except (KnownPrelaunchFailure, asyncio.CancelledError):
+                raise
+            except Exception as error:
+                # start() has not been called, so without a prepared owner to clean up
+                # the launch is known not to have happened.
+                if self._requires_backend_preflight_record():
+                    raise
+                raise KnownPrelaunchFailure(
+                    FailureClass.PROVIDER_TRANSIENT,
+                    f"backend preflight failed: {type(error).__name__}",
+                    safe_to_retry=True,
+                ) from error
             preflight_record = None
             if preflight.snapshot is not None:
                 if preflight.snapshot.preparation_id != context.preparation_id:
@@ -546,7 +559,7 @@ class ExecutionCoordinator:
                     try:
                         cleanup = await asyncio.wait_for(
                             self.backend.close(preflight.prepared_handle),
-                            timeout=self._shutdown_grace_seconds(),
+                            timeout=self._close_budget_seconds(),
                         )
                     except Exception as error:
                         self._mark_unknown_launch(
@@ -574,7 +587,7 @@ class ExecutionCoordinator:
                 if preflight.prepared_handle is not None:
                     cleanup = await asyncio.wait_for(
                         self.backend.close(preflight.prepared_handle),
-                        timeout=self._shutdown_grace_seconds(),
+                        timeout=self._close_budget_seconds(),
                     )
                     if not cleanup.settled:
                         self._mark_unknown_launch(
@@ -646,7 +659,7 @@ class ExecutionCoordinator:
                 try:
                     cleanup = await asyncio.wait_for(
                         self.backend.close(preflight.prepared_handle),
-                        timeout=self._shutdown_grace_seconds(),
+                        timeout=self._close_budget_seconds(),
                     )
                 except Exception as cleanup_error:
                     self._mark_unknown_launch(
@@ -708,6 +721,11 @@ class ExecutionCoordinator:
         settings = getattr(self.backend, "settings", None)
         configured = getattr(settings, "shutdown_grace_seconds", None)
         return float(configured if configured is not None else self.control_timeout_seconds)
+
+    def _close_budget_seconds(self) -> float:
+        # A backend's close() may legitimately take several grace periods to settle its owner.
+        budget = getattr(self.backend, "close_budget_seconds", None)
+        return float(budget if budget is not None else self._shutdown_grace_seconds())
 
     def _requires_backend_preflight_record(self) -> bool:
         return bool(getattr(self.backend, "requires_preflight_record", False))
@@ -902,6 +920,9 @@ class ExecutionCoordinator:
                     "error_class": FailureClass.CANCELLED,
                     "error_summary": reason,
                     "safe_to_retry": True,
+                    # The system, not a worker, ended this attempt before launch: its slot
+                    # may be admitted again without a user Retry.
+                    "retry_authorized": True,
                 }
             )
             next_status = self._status_after_settlement(run, attempt.spec.attempt_id)
@@ -911,12 +932,7 @@ class ExecutionCoordinator:
                 expected_revision=run.state.revision,
                 actor=self.actor,
                 occurred_at=self._now(),
-                run_update=RunProjectionUpdate(
-                    status=next_status,
-                    elapsed_seconds=self._elapsed(run),
-                    attention_reason=None,
-                    resume_status=None,
-                ),
+                run_update=self._settlement_run_update(run, next_status),
                 attempt_updates=(cancelled,),
                 outbox_outcomes=(
                     OutboxOutcomeChange(
@@ -973,7 +989,14 @@ class ExecutionCoordinator:
                     )
                     await self._finalize_decision(run_id, prior, failure)
                     return True
-                continue
+                # A verdict that went stale (the run moved while the engine answered) is not
+                # a decision; without a redirect the stage can never start, so ask again.
+                stale = (
+                    prior.disposition is not None
+                    and prior.disposition.reason == DecisionDispositionReason.STALE_RUN_REVISION
+                )
+                if not stale:
+                    continue
 
             # An explicit run-level profile selection is already coordinator input.
             if any(
@@ -1834,6 +1857,7 @@ class ExecutionCoordinator:
         deliveries: list[ControlDelivery] = []
         stage_redirects: list[StageRedirect] = []
         timeout_event: Event | None = None
+        attention_resume: RunStatus | None = None
 
         if isinstance(normalized, PauseIntervention):
             run_status = (
@@ -1871,6 +1895,7 @@ class ExecutionCoordinator:
                         )
                     )
                     run_status = RunStatus.ATTENTION_REQUIRED
+                    attention_resume = RunStatus.STOPPING
                     reason = "stop requested but worker launch ownership is unresolved"
         elif isinstance(normalized, StopAttemptIntervention):
             target = self.ledger.get_attempt(normalized.attempt_id)
@@ -1923,7 +1948,13 @@ class ExecutionCoordinator:
         elif isinstance(normalized, RetryIntervention):
             target = self.ledger.get_attempt(normalized.attempt_id)
             attempt_updates.append(target.state.model_copy(update={"retry_authorized": True}))
-            run_status = run.state.resume_status or RunStatus.RUNNING
+            # Retry authorizes an attempt; only an attention hold is lifted by it. A pause
+            # or stop stays in force until Resume, which runs its own recovery checks.
+            run_status = (
+                run.state.resume_status or RunStatus.RUNNING
+                if run.state.status == RunStatus.ATTENTION_REQUIRED
+                else run.state.status
+            )
             reason = "explicit retry authorized"
         elif isinstance(normalized, RedirectIntervention):
             stage_redirects.append(
@@ -1999,7 +2030,7 @@ class ExecutionCoordinator:
                         reason if run_status == RunStatus.ATTENTION_REQUIRED else None
                     ),
                     resume_status=(
-                        run.state.resume_status or run.state.status
+                        attention_resume or run.state.resume_status or run.state.status
                         if run_status == RunStatus.ATTENTION_REQUIRED
                         else None
                     ),
@@ -2173,7 +2204,7 @@ class ExecutionCoordinator:
                 raise ValueError("failure is not marked safe to retry")
             if not run.spec.workflow.policy.allow_retry:
                 raise ValueError("workflow policy forbids retry")
-            if len(lineage) >= min(
+            if self._used_attempts(lineage) >= min(
                 profile.retry_policy.max_attempts, run.spec.workflow.max_attempts_per_slot
             ):
                 raise ValueError("retry budget is exhausted")
@@ -2672,6 +2703,11 @@ class ExecutionCoordinator:
                 next_status = RunStatus.ATTENTION_REQUIRED
                 next_attention = attention_reason
                 next_resume = run.state.resume_status or run.state.status
+            if run.state.status in {RunStatus.SUCCEEDED, RunStatus.FAILED}:
+                # A sibling already ended the run; a late delivery outcome cannot reopen it.
+                next_status = run.state.status
+                next_attention = run.state.attention_reason
+                next_resume = run.state.resume_status
 
             event_kind = {
                 ControlDeliveryStatus.DELIVERING: EventKind.INTERVENTION_DELIVERY_ATTEMPTED,
@@ -2809,11 +2845,15 @@ class ExecutionCoordinator:
         deadline = started_at.timestamp() + profile.timeout_seconds
         stream = self.backend.events(handle)
         sequence = 0
+        # One pending read survives clock ticks: cancelling an async generator's
+        # anext() ends the stream, which would drop every later worker event.
+        event_task: asyncio.Future[WorkerEvent] | None = None
         try:
             while True:
-                event_task: asyncio.Future[WorkerEvent] = asyncio.ensure_future(anext(stream))
+                if event_task is None:
+                    event_task = asyncio.ensure_future(anext(stream))
                 clock_task = asyncio.create_task(self.clock.wait_until_advanced(self.clock.now))
-                done, pending = await asyncio.wait(
+                done, _pending = await asyncio.wait(
                     (event_task, clock_task), return_when=asyncio.FIRST_COMPLETED
                 )
                 if event_task in done:
@@ -2822,8 +2862,9 @@ class ExecutionCoordinator:
                         await clock_task
                     except asyncio.CancelledError:
                         pass
+                    finished, event_task = event_task, None
                     try:
-                        event = event_task.result()
+                        event = finished.result()
                     except StopAsyncIteration:
                         self._mark_unknown_launch(
                             self._action_for_attempt(attempt_id),
@@ -2857,12 +2898,13 @@ class ExecutionCoordinator:
                     )
                     return
 
-                event_task.cancel()
-                try:
-                    await event_task
-                except (asyncio.CancelledError, StopAsyncIteration):
-                    pass
                 if self._now().timestamp() >= deadline:
+                    event_task.cancel()
+                    try:
+                        await event_task
+                    except (asyncio.CancelledError, StopAsyncIteration):
+                        pass
+                    event_task = None
                     current_run = self.ledger.get_run(attempt.spec.run_id)
                     await self.apply_intervention(
                         StopAttemptIntervention(
@@ -2878,9 +2920,6 @@ class ExecutionCoordinator:
                         )
                     )
                     return
-                for task in pending:
-                    if task is not event_task:
-                        task.cancel()
         except asyncio.CancelledError:
             raise
         except BaseException as error:
@@ -2889,6 +2928,9 @@ class ExecutionCoordinator:
                 self.ledger.get_attempt(attempt_id),
                 f"worker stream outcome is unknown: {type(error).__name__}",
             )
+        finally:
+            if event_task is not None and not event_task.done():
+                event_task.cancel()
 
     @staticmethod
     def _validate_event_order(event: WorkerEvent, attempt_id: str, previous: int) -> int:
@@ -3045,20 +3087,7 @@ class ExecutionCoordinator:
                 expected_revision=run.state.revision,
                 actor=self.actor,
                 occurred_at=finished,
-                run_update=RunProjectionUpdate(
-                    status=next_status,
-                    elapsed_seconds=self._elapsed(run),
-                    attention_reason=(
-                        run.state.attention_reason
-                        if next_status == RunStatus.ATTENTION_REQUIRED
-                        else None
-                    ),
-                    resume_status=(
-                        run.state.resume_status
-                        if next_status == RunStatus.ATTENTION_REQUIRED
-                        else None
-                    ),
-                ),
+                run_update=self._settlement_run_update(run, next_status),
                 attempt_updates=(state,),
                 attempt_results=(AttemptResultRegistration(attempt_id=attempt_id, result=result),),
                 reservations=reservations,
@@ -3121,20 +3150,7 @@ class ExecutionCoordinator:
                 expected_revision=run.state.revision,
                 actor=self.actor,
                 occurred_at=self._now(),
-                run_update=RunProjectionUpdate(
-                    status=next_status,
-                    elapsed_seconds=self._elapsed(run),
-                    attention_reason=(
-                        run.state.attention_reason
-                        if next_status == RunStatus.ATTENTION_REQUIRED
-                        else None
-                    ),
-                    resume_status=(
-                        run.state.resume_status
-                        if next_status == RunStatus.ATTENTION_REQUIRED
-                        else None
-                    ),
-                ),
+                run_update=self._settlement_run_update(run, next_status),
                 attempt_updates=(failed,),
                 outbox_outcomes=(
                     OutboxOutcomeChange(
@@ -3195,18 +3211,7 @@ class ExecutionCoordinator:
                 expected_revision=run.state.revision,
                 actor=self.actor,
                 occurred_at=self._now(),
-                run_update=RunProjectionUpdate(
-                    status=next_status,
-                    elapsed_seconds=self._elapsed(run),
-                    attention_reason=(
-                        summary if next_status == RunStatus.ATTENTION_REQUIRED else None
-                    ),
-                    resume_status=(
-                        run.state.resume_status or run.state.status
-                        if next_status == RunStatus.ATTENTION_REQUIRED
-                        else None
-                    ),
-                ),
+                run_update=self._settlement_run_update(run, next_status, summary),
                 attempt_updates=(failed,),
                 attempt_results=(result_registration,) if result_registration else (),
                 reservations=releases,
@@ -3236,13 +3241,10 @@ class ExecutionCoordinator:
                     "safe_to_retry": False,
                 }
             )
-            return LedgerMutation(
-                command_id=uuid4(),
-                run_id=run.run_id,
-                expected_revision=run.state.revision,
-                actor=self.actor,
-                occurred_at=self._now(),
-                run_update=RunProjectionUpdate(
+            run_update = (
+                RunProjectionUpdate(status=run.state.status, elapsed_seconds=self._elapsed(run))
+                if run.state.status in {RunStatus.SUCCEEDED, RunStatus.FAILED}
+                else RunProjectionUpdate(
                     status=RunStatus.ATTENTION_REQUIRED,
                     elapsed_seconds=self._elapsed(run),
                     attention_reason=(
@@ -3251,7 +3253,15 @@ class ExecutionCoordinator:
                         else f"reconciliation pending: {summary}"
                     ),
                     resume_status=run.state.resume_status or run.state.status,
-                ),
+                )
+            )
+            return LedgerMutation(
+                command_id=uuid4(),
+                run_id=run.run_id,
+                expected_revision=run.state.revision,
+                actor=self.actor,
+                occurred_at=self._now(),
+                run_update=run_update,
                 attempt_updates=(uncertain,),
                 outbox_outcomes=(
                     OutboxOutcomeChange(
@@ -3275,9 +3285,15 @@ class ExecutionCoordinator:
         def build(run: PersistedRun) -> LedgerMutation:
             current = self.ledger.get_attempt(attempt.spec.attempt_id)
             started = self._now()
+            # A stop that raced this start already marked the attempt outcome-unknown;
+            # keep it so, but record the handle so the worker can still be reconciled.
             running = current.state.model_copy(
                 update={
-                    "status": AttemptStatus.RUNNING,
+                    "status": (
+                        AttemptStatus.RUNNING
+                        if current.state.status == AttemptStatus.LAUNCHING
+                        else current.state.status
+                    ),
                     "started_at": started,
                     "receipt_id": handle.handle_id,
                     "worker_handle_id": handle.handle_id,
@@ -3525,16 +3541,34 @@ class ExecutionCoordinator:
     ) -> bool:
         previous = lineage[-1]
         policy = self._profile(run, profile_id).retry_policy
+        used = self._used_attempts(lineage)
         return (
             run.spec.workflow.policy.allow_retry
             and previous.state.status
             in {AttemptStatus.FAILED, AttemptStatus.TIMED_OUT, AttemptStatus.CANCELLED}
-            and previous.state.error_class in policy.recoverable_classes
-            and len(lineage) < min(policy.max_attempts, run.spec.workflow.max_attempts_per_slot)
+            and (
+                previous.state.error_class in policy.recoverable_classes
+                or self._never_launched(previous)
+            )
+            and used < min(policy.max_attempts, run.spec.workflow.max_attempts_per_slot)
             and (not policy.require_safe_retry or previous.state.safe_to_retry)
             and (
                 previous.state.status != AttemptStatus.CANCELLED or previous.state.retry_authorized
             )
+        )
+
+    @classmethod
+    def _used_attempts(cls, lineage: Sequence[PersistedAttempt]) -> int:
+        # An attempt cancelled before any worker started spends no retry budget.
+        return sum(1 for item in lineage if not cls._never_launched(item))
+
+    @staticmethod
+    def _never_launched(attempt: PersistedAttempt) -> bool:
+        return (
+            attempt.state.status == AttemptStatus.CANCELLED
+            and attempt.state.started_at is None
+            and attempt.state.worker_handle_id is None
+            and attempt.state.retry_authorized
         )
 
     def _stage_has_only_settled_slots(self, run: PersistedRun, stage: ResolvedStage) -> bool:
@@ -3917,7 +3951,27 @@ class ExecutionCoordinator:
             for item in self.ledger.list_attempts(run_id)
         )
 
+    def _settlement_run_update(
+        self, run: PersistedRun, next_status: RunStatus, fallback_reason: str | None = None
+    ) -> RunProjectionUpdate:
+        """Build the run projection for every settlement, keeping an existing attention reason."""
+
+        attention = next_status == RunStatus.ATTENTION_REQUIRED
+        was_attention = run.state.status == RunStatus.ATTENTION_REQUIRED
+        return RunProjectionUpdate(
+            status=next_status,
+            elapsed_seconds=self._elapsed(run),
+            attention_reason=(run.state.attention_reason or fallback_reason) if attention else None,
+            resume_status=(
+                (run.state.resume_status if was_attention else run.state.status)
+                if attention
+                else None
+            ),
+        )
+
     def _status_after_settlement(self, run: PersistedRun, attempt_id: str) -> RunStatus:
+        if run.state.status in {RunStatus.SUCCEEDED, RunStatus.FAILED}:
+            return run.state.status
         remaining = any(
             item.spec.attempt_id != attempt_id and item.state.status in _ACTIVE_ATTEMPT_STATES
             for item in self.ledger.list_attempts(run.run_id)
