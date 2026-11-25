@@ -26,6 +26,7 @@ from orchestrator.domain.models import (
     ResumeIntervention,
     RetryIntervention,
     RunStatus,
+    StopAttemptIntervention,
     StopIntervention,
 )
 from orchestrator.execution import ExecutionCoordinator
@@ -389,3 +390,106 @@ async def test_cancelling_an_unlaunched_attempt_keeps_the_attention_hold(
     assert run.state.status is RunStatus.ATTENTION_REQUIRED
     assert run.state.attention_reason == "operator hold"
     assert run.state.resume_status is not None
+
+
+class _FailsTheRunDuringInterrupt(FakeBackend):
+    """Ends the run the way a failing sibling stage would, while a stop delivery is in flight."""
+
+    coordinator: ExecutionCoordinator
+    run_id: str
+
+    async def interrupt(self, handle, command_id):
+        self.coordinator._set_run_status(
+            self.coordinator.ledger.get_run(self.run_id), RunStatus.FAILED, "sibling stage failed"
+        )
+        return await super().interrupt(handle, command_id)
+
+
+@pytest.mark.asyncio
+async def test_late_stop_delivery_keeps_a_failed_run_failed(app_config, ledger_owner) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "review", "r9")
+    clock = FakeClock(origin=STAMP)
+    backend = _FailsTheRunDuringInterrupt(
+        backend_id="codex",
+        script_factory=lambda spec: AttemptScript(
+            events=_worker_script(spec).events, event_barrier=True
+        ),
+        clock=clock,
+        auto_release=False,
+    )
+    coordinator = ExecutionCoordinator(ledger, backend, ownership, clock=clock)
+    backend.coordinator = coordinator
+    backend.run_id = "r9"
+    coordinator.advance("r9")
+    coordinator.advance("r9")
+    await coordinator.dispatch_pending("r9")
+    attempt_id = ledger.list_attempts("r9")[0].spec.attempt_id
+    await asyncio.wait_for(backend.wait_until_waiting(attempt_id, 0), 5)
+
+    await coordinator.apply_intervention(
+        StopAttemptIntervention(
+            command_id=uuid4(),
+            actor="user",
+            target=attempt_id,
+            expected_run_revision=ledger.get_run("r9").state.revision,
+            kind=InterventionKind.STOP_ATTEMPT,
+            run_id="r9",
+            attempt_id=attempt_id,
+        )
+    )
+
+    assert ledger.get_run("r9").state.status is RunStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_manual_retry_budget_ignores_never_launched_attempts(
+    app_config, ledger_owner
+) -> None:
+    ledger, ownership = ledger_owner
+    _create_run(ledger, app_config, "review", "r10")
+    launched: list[str] = []
+
+    def factory(spec):
+        launched.append(spec.attempt_id)
+        if len(launched) == 1:
+            return AttemptScript(
+                events=(
+                    WorkerFailureEvent(
+                        kind="failed",
+                        attempt_id=spec.attempt_id,
+                        sequence=1,
+                        failure_class=FailureClass.PROVIDER_TRANSIENT,
+                        summary="transient",
+                        safe_to_retry=True,
+                    ),
+                ),
+                event_barrier=True,
+            )
+        return _worker_script(spec)
+
+    coordinator, backend, _clock = _coordinator(
+        ledger, ownership, factory=factory, auto_release=False
+    )
+    coordinator.advance("r10")
+    coordinator.advance("r10")  # admitted, never launched
+    await coordinator.apply_intervention(_control(PauseIntervention, ledger, "r10"))
+    await coordinator.dispatch_pending("r10")  # cancels it before any worker starts
+    await coordinator.apply_intervention(_control(ResumeIntervention, ledger, "r10"))
+    coordinator.advance("r10")
+    coordinator.advance("r10")
+    await coordinator.dispatch_pending("r10")
+    launched_attempt = next(
+        item for item in ledger.list_attempts("r10") if item.spec.attempt_id in launched
+    )
+    await asyncio.wait_for(backend.wait_until_waiting(launched_attempt.spec.attempt_id, 0), 5)
+    await coordinator.apply_intervention(_control(PauseIntervention, ledger, "r10"))
+    backend.release_next(launched_attempt.spec.attempt_id)
+    await asyncio.wait_for(coordinator.wait_for_workers(), 5)
+    assert len(ledger.list_attempts("r10", launched_attempt.stage_id)) >= 2
+
+    result = await coordinator.apply_intervention(
+        _control(RetryIntervention, ledger, "r10", attempt_id=launched_attempt.spec.attempt_id)
+    )
+
+    assert result.outcome.value == "accepted"

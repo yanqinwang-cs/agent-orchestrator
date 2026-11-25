@@ -994,7 +994,6 @@ class ExecutionCoordinator:
                 stale = (
                     prior.disposition is not None
                     and prior.disposition.reason == DecisionDispositionReason.STALE_RUN_REVISION
-                    and self.ledger.get_stage_redirect(run_id, question.stage_id) is None
                 )
                 if not stale:
                     continue
