@@ -18,7 +18,7 @@ uv run agent-orchestrator --help
 uv run agent-orchestrator --version
 ```
 
-The default CLI reports that run commands and the UI are unavailable. Its old milestone wording is an implementation cleanup item, not a current roadmap. The offline suite uses local fixtures, fake workers, and local process-owner probes; it makes no live provider calls.
+The default CLI reports that run commands and the UI are not implemented yet. The offline suite uses local fixtures, fake workers, and local process-owner probes; it makes no live provider calls.
 
 ## Agent Lab backend
 
